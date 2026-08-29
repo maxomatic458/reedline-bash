@@ -2,7 +2,7 @@
 name = "reedline-bash"
 version = "0.1.0"
 edition = "2024"
-description = "Drive an interactive bash session's line editing with reedline"
+description = "Bash plugin that replaces bash's `readline` with [reedline](https://github.com/nushell/reedline)"
 license = "MIT"
 
 [workspace]
