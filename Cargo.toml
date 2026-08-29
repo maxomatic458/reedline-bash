@@ -1,0 +1,25 @@
+[package]
+name = "reedline-bash"
+version = "0.1.0"
+edition = "2024"
+description = "Drive an interactive bash session's line editing with reedline"
+license = "MIT"
+
+[workspace]
+
+[lib]
+name = "reedline_bash"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+reedline = "0.51.0"
+crossterm = "0.29"
+nu-ansi-term = "0.50"
+unicode-width = "0.2"
+libc = "0.2"
+toml = "0.8"
+strum = { version = "0.28.0", features = ["derive"] }
+# stolen from flyline
+flash = { git = "https://github.com/HalFrgrd/flash.git", rev = "59af2ab94aaa6b7a407d09549605b1d3bc81256c" }
+serde = { version = "1.0.229", features = ["derive"] }

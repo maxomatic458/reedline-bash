@@ -1,0 +1,7 @@
+target/
+flyline/
+nushell/
+reedline/
+.git/
+__pycache__/
+*.pyc

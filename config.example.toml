@@ -1,0 +1,218 @@
+# reedline-bash configuration.
+#
+# Copy to ~/.config/reedline-bash/config.toml. Every setting below is shown at
+# its default.
+#
+# The configuration is hot-reloaded automatically and refreshes on each new prompt.
+# 
+# You can override the location with $REEDLINE_BASH_CONFIG, or $XDG_CONFIG_HOME.
+
+[editor]
+# edit_mode: emacs, vi, helix
+mode = "emacs"
+# Bash syntax highlighting.
+highlight = true
+# Fish-style suggestion from history, shown greyed out ahead of the cursor.
+hints = true
+# bracketed_paste: let the terminal mark pasted text, so a paste is inserted
+# rather than run. Currently useless on windows.
+bracketed_paste = true
+# use_kitty_protocol: enables the keyboard enhancement protocol implemented by
+# the kitty console (if your terminal supports it).
+kitty_protocol = false
+# use_ansi_coloring: set false for a monochrome line.
+ansi_colors = true
+# Click to move the cursor within the line.
+mouse_click = false
+# Whether a block caret crosses line boundaries on h/l, in vi and helix normal
+# mode. false stops at the line edge, which is vim's own behaviour. A bar caret
+# (emacs, vi insert) always moves freely.
+cross_line_cursor = true
+# shell_integration: emits escape sequences marking where the prompt and command
+# begin and end, so the terminal can offer jump-to-previous-prompt and similar.
+#   off                 - emit nothing
+#   osc133              - Ghostty, WezTerm, Kitty
+#   osc133_click_events - OSC 133 plus mouse-click reporting, for click-to-cursor
+#   osc633              - VS Code's extension, also reports the command and cwd
+shell_integration = "off"
+# buffer_editor: command that will be used to edit the current line buffer with
+# ctrl+o, e.g. "vim" or "code -w". Empty leaves Ctrl-O unbound rather than
+# falling back to $EDITOR.
+buffer_editor = ""
+
+# cursor_shape: inherit, block, underscore, line, blink_block, blink_underscore,
+# blink_line. "inherit" skips setting the cursor shape.
+[cursor]
+emacs = "inherit"
+vi_insert = "inherit"
+vi_normal = "inherit"
+helix_insert = "inherit"
+helix_normal = "inherit"
+helix_select = "inherit"
+
+
+# Selected completion menu and styling.
+[menu]
+# type.layout:
+#   columnar - a grid, closest to what bash itself shows
+#   ide      - a dropdown under the cursor, with descriptions
+#   list     - one entry per row, paged
+style = "columnar"
+# marker: drawn just before the buffer while the menu is open.
+marker = ""
+# What the menu sends to the completer.
+#   cursor_prefix - the buffer up to the cursor
+#   diff          - only the text typed after the menu opened
+#   full_buffer   - the whole buffer, including text after the cursor
+input_mode = "cursor_prefix"
+# What a selected suggestion replaces.
+#   suggested_span - the range the completer asked for
+#   full_buffer    - the whole buffer
+#   extend_to_end  - from the start of that range to the end of the buffer
+output_mode = "suggested_span"
+# Keep an open menu alive while the line is edited. When false, a backspace or
+# an emptied line dismisses it. Esc, Ctrl-C and accepting a value always close
+# it.
+persistent = false
+
+# A grid of suggestions under the line.
+[menu.columnar]
+columns = 4
+# col_width: 0 uses all the screen width to calculate column width.
+col_width = 0
+col_padding = 2
+# Which way the selection walks: across each row, or down each column.
+# horizontal | vertical
+traversal = "horizontal"
+
+# IDE-style dropdown below the cursor, with a description box to the side (currently not implemented).
+[menu.ide]
+min_width = 0
+max_width = 50
+# 0 means as many rows as the available lines in the terminal allow.
+max_height = 0
+padding = 0
+border = false
+# Shifts the dropdown sideways from the cursor. Negative moves it left.
+cursor_offset = 0
+# Which side the description box prefers. left | right | prefer-right
+description_mode = "prefer-right"
+min_description_width = 15
+max_description_width = 50
+max_description_height = 10
+# Gap between the completion box and the description box.
+description_offset = 1
+# If true, the cursor pos will be corrected, so the suggestions match up with
+# the typed text:
+#
+#   $ str
+#     str join
+#     str trim
+#     str split
+correct_cursor_pos = false
+
+# Characters to use for the border
+[menu.ide.border_symbols]
+top_left = "╭"
+top_right = "╮"
+bottom_left = "╰"
+bottom_right = "╯"
+horizontal = "─"
+vertical = "│"
+
+# One entry per row, paged.
+[menu.list]
+page_size = 10
+# How many rows one long entry may wrap onto.
+max_entry_lines = 5
+# Where an entry's description goes. before | after
+description_position = "before"
+
+# Menu colours, mirroring nushell's per-menu `style` record.
+[menu.colors]
+text = "green"
+selected_text = "green_reverse"
+# description_text
+description = "yellow"
+# match_text: the part of a suggestion matching what you typed.
+match = "green_bold"
+# selected_match_text
+selected_match = "green_bold_reverse"
+
+# colors
+[colors]
+# The first word of a command, and after every |, &&, ;
+command = "light_green"
+# Shell builtins and keywords: cd, echo, if, for, done ...
+builtin = "light_green_bold"
+# '...' and "..."
+string = "light_yellow"
+# $VAR, ${...}, $(...), $((...))
+variable = "light_cyan"
+# | && ; > < and others
+operator = "light_purple"
+comment = "dark_gray_italic"
+# hints: the history suggestion drawn ahead of the cursor.
+hint = "dark_gray"
+# Visual selection, in vi and helix modes.
+selection = "reverse"
+# The cell under the cursor inside a selection. Empty means "same as selection".
+selection_cursor = ""
+
+[completion]
+# completions.partial: set this to false to prevent partial filling of the
+# prompt
+partial = true
+
+
+[history]
+# history.max_size: how many entries to read back from the shell's history.
+size = 5000
+# Commands starting with this are kept out of reedline's history, matching
+# bash's HISTCONTROL=ignorespace. Set to "" to record everything.
+ignore_prefix = " "
+
+# Fish-style abbreviations: type the key, then a space, and it expands in place.
+#
+# [abbreviations]
+# gs = "git status"
+# gc = "git commit -m"
+
+# Keybindings. `~/.inputrc` is not read, we use reedline's own keybinding system.
+#
+# `key` is modifiers then one key, joined with "-".
+#
+# Then either `event` (a reedline event) or `edit` (a list of edit commands),
+#
+# [[keybinding]]
+# key = "ctrl-r"
+# event = "SearchHistory"
+#
+# [[keybinding]]
+# key = "alt-left"
+# edit = [{ MoveWordLeft = { select = false } }]
+#
+# [[keybinding]]
+# key = "ctrl-l"
+# event = "ClearScreen"
+#
+# [[keybinding]]
+# key = "f2"
+# event = { Menu = "completion_menu" }
+#
+# [[keybinding]]
+# key = "ctrl-shift-x"
+# edit = [{ CutSelection = { granularity = "CharWise" } }]
+#
+# [[keybinding]]
+# key = "ctrl-shift-c"
+# edit = ["CopySelection"]
+#
+# [[keybinding]]
+# key = "ctrl-shift-v"
+# edit = ["PasteCutBufferBefore"]
+#
+# [[keybinding]]
+# key = "ctrl-shift-a"
+# edit = ["SelectAll"]
+
