@@ -1,6 +1,6 @@
 import os
 
-from harness import UP, ctrl, known_issue, scratch, shell, test
+from harness import UP, ctrl, scratch, shell, test
 
 
 @test
@@ -49,16 +49,70 @@ def test_history_size_limits_how_far_back_recall_reaches():
 
 
 @test
-@known_issue("a space-prefixed command is still recalled in the session that ran it")
-def test_the_ignore_prefix_keeps_a_command_out_of_recall():
-    """Bash's `HISTCONTROL=ignorespace`, applied to reedline's own history.
+def test_clearing_the_shells_history_clears_recall():
+    with shell() as sh:
+        sh.run("echo cleared_away")
+        sh.run("history -c")
+        recalled = []
+        for _ in range(4):
+            sh.press(UP)
+            recalled.append(sh.line)
+        assert not any("cleared_away" in line for line in recalled), recalled
 
-    It has to hold for the command just run, which is when it matters."""
-    with shell(config='[history]\nignore_prefix = " "\n') as sh:
-        sh.run("echo kept")
-        sh.run(" echo hidden")
+
+@test
+def test_clearing_the_shells_history_stops_the_hint():
+    """`history -c` used to leave the suggestions coming."""
+    with shell() as sh:
+        sh.run("echo hinted_away")
+        sh.type("echo hi")
+        assert sh.line == "echo hinted_away", sh.line
+
+        sh.press(ctrl("u"))
+        sh.run("history -c")
+        sh.type("echo hi")
+        assert sh.line == "echo hi", sh.line
+
+
+@test
+def test_a_repeated_command_is_recalled_once_per_copy_the_shell_kept():
+    """Four presses, which is what native bash takes.
+
+    Reedline's own history would skip the second copy and reach `echo first`
+    a press sooner."""
+    with shell() as sh:
+        for command in ("echo first", "echo dup", "echo dup", "echo other"):
+            sh.run(command)
+        sh.press(UP, UP, UP)
+        assert sh.line == "echo dup", sh.line
         sh.press(UP)
-        assert sh.line == "echo kept", sh.line
+        assert sh.line == "echo first", sh.line
+
+
+@test
+def test_a_line_the_shell_reads_mid_session_becomes_recallable():
+    with shell() as sh:
+        extra = os.path.join(sh.dir, "extra")
+        with open(extra, "w") as fh:
+            fh.write("echo read_in_late\n")
+        sh.run(f"history -r {extra}")
+        sh.press(UP)
+        assert sh.line == "echo read_in_late", sh.line
+
+
+@test
+def test_a_deleted_entry_is_no_longer_recalled():
+    with shell() as sh:
+        sh.run("echo doomed")
+        sh.run("echo spared")
+        # Entries are numbered from the oldest, so 1 is `echo doomed`.
+        sh.run("history -d 1")
+        recalled = []
+        for _ in range(5):
+            sh.press(UP)
+            recalled.append(sh.line)
+        assert "echo spared" in recalled, recalled
+        assert "echo doomed" not in recalled, recalled
 
 
 @test

@@ -369,6 +369,15 @@ unsafe extern "C" {
     pub fn history_list() -> *mut *mut HistoryEntry;
 
     /// ```c
+    /// extern int history_length;
+    /// ```
+    /// [`lib/readline/history.h:253`] — how many entries [`history_list`] has,
+    /// which is otherwise only findable by walking to its terminator.
+    ///
+    /// [`lib/readline/history.h:253`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/lib/readline/history.h?h=bash-5.3#n253
+    pub static mut history_length: c_int;
+
+    /// ```c
     /// extern char **rl_completion_matches (const char *, rl_compentry_func_t *);
     /// ```
     /// [`lib/readline/readline.h:495`] — run a generator until it stops
@@ -488,7 +497,7 @@ pub unsafe fn bash_strdup(text: &str) -> *mut c_char {
 /// Read a shell variable, or `None` when it is unset.
 ///
 /// # Safety
-/// Calls into bash; must run on the thread bash called into us on.
+/// Calls into bash. must run on the thread bash called into us on.
 pub unsafe fn shell_variable(name: &str) -> Option<String> {
     let c_name = std::ffi::CString::new(name).ok()?;
     let var = unsafe { find_variable(c_name.as_ptr()) };
@@ -506,34 +515,32 @@ pub unsafe fn shell_variable(name: &str) -> Option<String> {
     )
 }
 
-/// Every command in the shell's history, oldest first.
+/// How many commands the shell is holding.
 ///
 /// # Safety
-/// Calls into bash; must run on the thread bash called into us on.
-pub unsafe fn history_lines() -> Vec<String> {
-    let mut lines = Vec::new();
+/// Calls into bash. must run on the thread bash called into us on.
+pub unsafe fn history_len() -> usize {
+    unsafe { usize::try_from(history_length).unwrap_or(0) }
+}
+
+/// The command at `index`, counting from the oldest.
+///
+/// # Safety
+/// Calls into bash. Must run on the thread bash called into us on. `index` must
+/// be below whatever [`history_len`] last returned.
+pub unsafe fn history_line<'a>(index: usize) -> Option<&'a [u8]> {
     unsafe {
         let list = history_list();
         if list.is_null() {
-            return lines;
+            return None;
         }
-        let mut index = 0isize;
-        loop {
-            let entry = *list.offset(index);
-            if entry.is_null() {
-                break;
-            }
-            if !(*entry).line.is_null() {
-                lines.push(
-                    std::ffi::CStr::from_ptr((*entry).line)
-                        .to_string_lossy()
-                        .into_owned(),
-                );
-            }
-            index += 1;
+        // An off-by-one lands on the terminator, so it comes back empty.
+        let entry = *list.add(index);
+        if entry.is_null() || (*entry).line.is_null() {
+            return None;
         }
+        Some(std::ffi::CStr::from_ptr((*entry).line).to_bytes())
     }
-    lines
 }
 
 /// The arguments a builtin was called with.

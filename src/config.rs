@@ -396,7 +396,6 @@ pub struct Config {
 
     // history
     pub history_size: usize,
-    pub history_ignore_prefix: Option<String>,
 
     pub abbreviations: HashMap<String, String>,
     pub keybindings: Vec<Binding>,
@@ -423,8 +422,6 @@ impl Default for Config {
             selection_cursor_style: None,
             partial_completions: true,
             history_size: 5000,
-            // Bashs HISTCONTROL=ignorespace.
-            history_ignore_prefix: Some(" ".to_string()),
             abbreviations: HashMap::new(),
             keybindings: Vec::new(),
         }
@@ -487,13 +484,6 @@ impl Config {
             "history.size",
             &mut notes,
         );
-        if let Some(prefix) = raw.history.ignore_prefix {
-            config.history_ignore_prefix = if prefix.is_empty() {
-                None
-            } else {
-                Some(prefix)
-            };
-        }
 
         config.abbreviations = raw.abbreviations;
         config.keybindings = bindings(raw.keybinding, &mut notes);
@@ -979,7 +969,6 @@ struct RawCompletion {
 #[derive(Debug, Default, Deserialize)]
 struct RawHistory {
     size: Option<usize>,
-    ignore_prefix: Option<String>,
     #[serde(flatten)]
     unknown: HashMap<String, toml::Value>,
 }
@@ -1135,12 +1124,6 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("Tab"), "{warnings:?}");
         assert_eq!(config, Config::default());
-    }
-
-    #[test]
-    fn an_empty_ignore_prefix_means_no_exclusion_rather_than_excluding_everything() {
-        let (config, _) = parse("[history]\nignore_prefix = \"\"\n");
-        assert_eq!(config.history_ignore_prefix, None);
     }
 
     /// Each menu keeps its own table, so a setting cannot be aimed at the wrong
@@ -1455,7 +1438,6 @@ mod tests {
 
             [history]
             size = 42
-            ignore_prefix = "#"
 
             [abbreviations]
             gs = "git status"
@@ -1538,7 +1520,6 @@ mod tests {
 
         assert!(!config.partial_completions);
         assert_eq!(config.history_size, 42);
-        assert_eq!(config.history_ignore_prefix.as_deref(), Some("#"));
 
         assert_eq!(
             config.abbreviations.get("gs").map(String::as_str),

@@ -98,9 +98,10 @@ fn build(config: &config::Config) -> Reedline {
         .with_highlighter(highlighter::for_config(config.highlight, &config.palette))
         .with_completer(Box::new(BashCompleter::new(BashSource)))
         .with_validator(Box::new(BashValidator))
-        .with_history(unsafe {
-            history::from_bash(config.history_size, config.history_ignore_prefix.as_deref())
-        })
+        .with_history(Box::new(history::BashHistory::new(
+            history::BashSource,
+            config.history_size,
+        )))
         .with_cursor_config(cursor_config(&config.cursor))
         .with_visual_selection_style(config.selection_style)
         .use_bracketed_paste(config.bracketed_paste)
@@ -116,7 +117,6 @@ fn build(config: &config::Config) -> Reedline {
         .with_persistent_menus(config.menu.persistent)
         .with_quick_completions(true)
         .with_partial_completions(config.partial_completions)
-        .with_history_exclusion_prefix(config.history_ignore_prefix.clone())
         .with_ansi_colors(config.ansi_colors);
 
     if let Some(style) = config.selection_cursor_style {

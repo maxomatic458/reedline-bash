@@ -168,11 +168,10 @@ partial = true
 
 
 [history]
-# history.max_size: how many entries to read back from the shell's history.
+# history.size: how many entries to read back from the shell's history.
+# What goes into the history is the shell's own business: see HISTCONTROL,
+# HISTIGNORE and HISTSIZE.
 size = 5000
-# Commands starting with this are kept out of reedline's history, matching
-# bash's HISTCONTROL=ignorespace. Set to "" to record everything.
-ignore_prefix = " "
 
 # Fish-style abbreviations: type the key, then a space, and it expands in place.
 #
