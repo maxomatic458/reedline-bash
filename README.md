@@ -3,6 +3,8 @@
 ![Syntax highlighting, suggestions from history, completion menus over bash's
 own completions, abbreviation expansions, and multiline edits](reedline-bash.gif)
 
+GIF created with [evp](https://github.com/HalFrgrd/evp)
+
 A bash plugin that replaces bash's line editor, readline, with
 [reedline](https://github.com/nushell/reedline) — the line editor powering
 nushell.
