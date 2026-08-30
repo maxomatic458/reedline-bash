@@ -1,3 +1,5 @@
+import os
+
 from harness import ctrl, shell, test
 from harness.shell import LIB
 
@@ -109,6 +111,20 @@ def test_unloading_hands_the_shell_back_to_readline():
         sh.attached = False
         sh.wait_prompt()
         assert sh.run("echo after_unload") == ["after_unload"]
+
+
+@test
+def test_a_shell_whose_terminal_closes_exits():
+    """Closing a terminal has to end the shell behind it."""
+    sh = shell()
+    try:
+        sh.__enter__()
+        assert sh.run("echo ready") == ["ready"]
+        sh._closed = True
+        os.close(sh.master)
+        assert sh.wait_exit(timeout=8), "the shell outlived its terminal"
+    finally:
+        sh.close()
 
 
 @test

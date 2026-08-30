@@ -70,6 +70,31 @@ def test_a_submitted_line_keeps_its_colours_in_the_scrollback():
 
 
 @test
+def test_a_function_body_typed_over_several_lines_is_highlighted():
+    body = [
+        "hello() {",
+        '    if [ -z "$1" ]; then',
+        '        echo "Hello, stranger!"',
+        "    else",
+        '        echo "Hello, $1!"',
+        "    fi",
+    ]
+    with shell() as sh:
+        for part in body:
+            sh.type(part)
+            sh.press("\r")
+        sh.type("}")
+        for word in ("if", "then", "else", "fi"):
+            assert sh.style_of(word).fg == COMMAND, f"{word}: {sh.style_of(word)}"
+        assert sh.style_of("echo").bold, "echo is a builtin"
+        assert sh.style_of('"Hello, stranger!"').fg == STRING
+
+        assert sh.run("") == []
+        assert sh.run("hello world") == ["Hello, world!"]
+        assert sh.run("hello") == ["Hello, stranger!"]
+
+
+@test
 def test_a_multiline_command_is_highlighted_throughout():
     with shell() as sh:
         sh.type("for i in 1 2; do")

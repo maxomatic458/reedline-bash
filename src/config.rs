@@ -16,7 +16,7 @@ use strum::{Display, EnumString, VariantNames};
 use crate::{keys, style};
 
 /// Path of the config file.
-/// 
+///
 /// - `None` being defaults.
 pub fn path() -> Option<PathBuf> {
     if let Ok(explicit) = std::env::var("REEDLINE_BASH_CONFIG")

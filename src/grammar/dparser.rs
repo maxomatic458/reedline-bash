@@ -500,6 +500,18 @@ impl DParser {
 
             // Clone the token so we can match on it while still mutating self.tokens[idx].annotation.
             let token = self.tokens[idx].token.clone();
+            // A newline ends a command as `;` does, unless it is only text.
+            if token.kind == TokenKind::Newline
+                && active_quote.is_none()
+                && Self::active_heredoc_opening_idx(&self.tokens, &heredocs, &nestings, &token)
+                    .is_none()
+                && previous_token
+                    .as_ref()
+                    .is_none_or(|prev| prev.token.value != "\\")
+            {
+                self.current_command_range = None;
+            }
+
             let active_heredoc_opening_idx =
                 Self::active_heredoc_opening_idx(&self.tokens, &heredocs, &nestings, &token);
 
@@ -880,11 +892,14 @@ impl DParser {
                     }
 
                     // A Comment token must never start a command range or be
-                    // tagged as a command word.
+                    // tagged as a command word. Nor may a Newline: it ends the
+                    // command before it, and the command after it starts at the
+                    // next word.
                     if self.current_command_range.is_none()
                         && !in_double_quote
                         && !in_single_quote
                         && token.kind != TokenKind::Comment
+                        && token.kind != TokenKind::Newline
                     {
                         self.tokens[idx].annotations.command_word =
                             Some(self.tokens[idx].token.value.clone());

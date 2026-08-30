@@ -21,5 +21,11 @@ libc = "0.2"
 toml = "0.8"
 strum = { version = "0.28.0", features = ["derive"] }
 # stolen from flyline
-flash = { git = "https://github.com/HalFrgrd/flash.git", rev = "59af2ab94aaa6b7a407d09549605b1d3bc81256c" }
+flash = { git = "https://github.com/maxomatic458/flash.git", rev = "4a9145d17bd8b62fe8e872de10f837ef1dd5b72a" }
 serde = { version = "1.0.229", features = ["derive"] }
+
+# crossterm 0.29 has a bug where it loops forever on a closed terminal. 
+# This happens with reedline-bash, the fix is not in upstream yet, therefore
+# we use the patched fork. (see #793, #1110)
+[patch.crates-io]
+crossterm = { git = "https://github.com/daulet/crossterm", rev = "ea7f652639fa2e5c4248cb0fa3b8bed2c1928714" }

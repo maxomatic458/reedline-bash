@@ -506,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flash: `!` is a plain word and takes the command slot from the command after it"]
+    #[ignore = "dparser: `!` is a plain word and takes the command slot from the command after it"]
     fn a_negation_keeps_the_command_after_it() {
         let pieces = kinds("if ! grep -q x f; then :; fi");
         let p = Palette::default();
@@ -515,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flash: `(` and `{` take the command slot from the command inside them"]
+    #[ignore = "dparser: `(` and `{` take the command slot from the command inside them"]
     fn command_position_follows_the_separators() {
         let p = Palette::default();
         let plain = Style::new();
@@ -621,7 +621,6 @@ mod tests {
         );
     }
     #[test]
-    #[ignore = "flash: a newline does not restart command position"]
     fn each_line_of_a_multiline_command_is_scanned_on_its_own() {
         let p = Palette::default();
         let pieces = kinds("for f in a b; do\n  echo $f\ndone");
@@ -633,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flash: an indexed target is not an env var, and `FOO=$BAR` swallows the command after it"]
+    #[ignore = "dparser: an indexed target is not an env var, and `FOO=$BAR` swallows the command after it"]
     fn an_assignment_prefix_is_not_the_command() {
         let p = Palette::default();
         // The name being assigned to is the variable; the value is a plain word.
@@ -665,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flash: `for`/`select`/`case` give the command slot to their variable, and `time` is not a keyword"]
+    #[ignore = "dparser: `for`/`select`/`case` give the command slot to their variable, and `time` is not a keyword"]
     fn a_keyword_that_takes_a_word_does_not_start_a_command() {
         let p = Palette::default();
         let plain = Style::new();
@@ -695,7 +694,44 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flash: `[` is not a command, and `local x=1` is one plain word"]
+    fn a_newline_ends_a_command_like_a_semicolon_does() {
+        let p = Palette::default();
+        // The same thing on one line already works; the newline is the difference.
+        for line in [
+            "echo hi; if true; then :; fi",
+            "echo hi\nif true; then :; fi",
+        ] {
+            let pieces = kinds(line);
+            assert_eq!(style_of(&pieces, "if"), Some(&p.builtin), "{line:?}");
+            assert_eq!(style_of(&pieces, "fi"), Some(&p.builtin), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_function_body_written_over_several_lines_is_highlighted() {
+        let script = "\
+hello() {
+    if [ -z \"$1\" ]; then
+        echo \"Hello, stranger!\"
+    else
+        echo \"Hello, $1!\"
+    fi
+}";
+        let p = Palette::default();
+        let pieces = kinds(script);
+
+        assert_eq!(text_of(script), script, "round trip");
+        assert_eq!(style_of(&pieces, "hello"), Some(&p.command));
+        assert_eq!(style_of(&pieces, "if"), Some(&p.builtin));
+        assert_eq!(style_of(&pieces, "then"), Some(&p.builtin));
+        assert_eq!(style_of(&pieces, "echo"), Some(&p.builtin));
+        assert_eq!(style_of(&pieces, "else"), Some(&p.builtin));
+        assert_eq!(style_of(&pieces, "fi"), Some(&p.builtin));
+        assert_eq!(style_of(&pieces, "\"Hello, stranger!\""), Some(&p.string));
+    }
+
+    #[test]
+    #[ignore = "dparser: `[` is not a command, and `local x=1` is one plain word"]
     fn a_multiline_function_definition_is_coloured_throughout() {
         let script = "\
 deploy() {
@@ -735,7 +771,7 @@ deploy() {
     }
 
     #[test]
-    #[ignore = "flash: a nested `case` is not a keyword, and `COUNT=$(...)` is one plain word"]
+    #[ignore = "dparser: a nested `case` is not a keyword, and `COUNT=$(...)` is one plain word"]
     fn a_multiline_loop_and_case_script_is_coloured_throughout() {
         let script = "\
 for f in *.log; do
