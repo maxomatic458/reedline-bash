@@ -13,6 +13,8 @@ you keep your existing bash prompt, completions and history.
 
 ## Installation
 
+requires bash 5.3 or newer
+
 ```bash
 cargo build --release
 ```
