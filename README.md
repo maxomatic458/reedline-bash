@@ -40,32 +40,28 @@ outside. But bash's parser never calls readline directly — it reads characters
 through a function pointer, and that pointer can be replaced.
 
 ```
-                         bash process
-  ┌──────────────────────────────────────────────────────────┐
-  │  parser ── wants a character ──▶ get_char()   ← ours      │
-  │                                      │                    │
-  │                                      ▼                    │
-  │                          Reedline::read_line()            │
-  │                            prompt, editing, menus         │
-  │                                      │                    │
-  │  parser ◀── one byte at a time ── the finished line       │
-  └──────────────────────────────────────────────────────────┘
+  native bash          reedline-bash
+  -----------          -------------
+  parser               parser
+  |                    |
+  v                    v
+  readline             get_char  <- We inject this by replacing
+  |                    |            the `bash_input.getter` function
+  |                    v            pointer.
+  |                    reedline
+  |                    |
+  v                    v
+  your terminal        your terminal
+
 ```
 
-1. `enable -f lib.so reedline` is bash's loadable-builtin mechanism: it
-   `dlopen`s the object into bash's *own process*. Bash is linked with
-   `-rdynamic`, so the object can reach bash's internals.
-2. We point `bash_input.getter` at our `get_char`, and the parser starts
-   reading through it instead of readline.
-3. The parser asks for one character at a time. When our buffer runs dry we
-   call `Reedline::read_line()`.
-4. Reedline draws the prompt and handles the editing, then returns the line.
-5. We hand it back byte by byte, and bash runs it as it always did.
+1. We load reedline-bash into the bash process with: `enable -f reedline-bash.so reedline`
+2. Once loaded `bash_input.getter` points to our `get_char`. Bash will read
+   through it instead of readline.
+3. Reedline draws the prompt and handles the editing, then returns the line.
+4. We hand it back byte by byte, and bash runs normally.
 
-Living inside the bash process is what makes the rest come for free. The prompt
-is your `PS1`, expanded by bash's own `decode_prompt_string()`. Completion calls
-the same functions readline would, so `complete -F` and bash-completion work
-untouched. History is bash's live list rather than a copy of it.
+reedline-bash still uses your native bash completions and history, for inline suggestions and the completion menus provided by reedline.
 
 ## References and sources
 

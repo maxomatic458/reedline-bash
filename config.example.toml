@@ -22,7 +22,9 @@ bracketed_paste = true
 kitty_protocol = false
 # use_ansi_coloring: set false for a monochrome line.
 ansi_colors = true
-# Click to move the cursor within the line.
+# Left click moves the cursor. 
+# needs shell_integration = "osc133_click_events" below.
+
 mouse_click = false
 # Whether a block caret crosses line boundaries on h/l, in vi and helix normal
 # mode. false stops at the line edge, which is vim's own behaviour. A bar caret

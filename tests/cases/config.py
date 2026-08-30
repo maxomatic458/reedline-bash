@@ -215,6 +215,30 @@ def test_no_cursor_shape_is_requested_by_default():
 
 
 @test
+def test_click_to_move_needs_both_settings():
+    """Two halves: the OSC 133 marker asks a supporting terminal to report
+    clicks, and `mouse_click` is what acts on one. Either alone does nothing
+    useful."""
+    marker = '[editor]\nshell_integration = "osc133_click_events"\n'
+    acting = "[editor]\nmouse_click = true\n"
+    # Row 2 is the prompt row; column 10 is five characters into the buffer.
+    click = ("\x1b[<0;10;2M", "\x1b[<0;10;2m")
+
+    with shell(config=acting + marker.split("\n", 1)[1]) as sh:
+        sh.type("echo hello world")
+        sh.press(*click)
+        sh.type("X")
+        assert sh.line == "echo Xhello world", sh.line
+        assert "click_events=1" in sh.raw, "the terminal was never asked for clicks"
+
+    with shell(config=marker) as sh:
+        sh.type("echo hello world")
+        sh.press(*click)
+        sh.type("X")
+        assert sh.line == "echo hello worldX", "clicked without mouse_click"
+
+
+@test
 def test_the_kitty_protocol_is_not_forced_on():
     with shell() as sh:
         assert ">1u" not in sh.raw, "keyboard enhancement requested without asking"
