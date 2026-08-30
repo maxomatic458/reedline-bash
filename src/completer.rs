@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use reedline::{Completer, CompletionResult, Span, Suggestion, Suggestions};
 
+use crate::bash::complete::Candidates;
 use crate::words;
 
 /// Source of the completion candidates.
@@ -12,7 +13,7 @@ pub trait CandidateSource: Send {
     /// The characters that end a word.
     fn word_breaks(&self) -> String;
 
-    fn candidates(&mut self, line: &str, start: usize, pos: usize) -> io::Result<Vec<String>>;
+    fn candidates(&mut self, line: &str, start: usize, pos: usize) -> io::Result<Candidates>;
 }
 
 /// Bash itself.
@@ -23,7 +24,7 @@ impl CandidateSource for BashSource {
         crate::bash::complete::word_breaks()
     }
 
-    fn candidates(&mut self, line: &str, start: usize, pos: usize) -> io::Result<Vec<String>> {
+    fn candidates(&mut self, line: &str, start: usize, pos: usize) -> io::Result<Candidates> {
         // SAFETY: single-threaded, and the shell is blocked waiting on us.
         Ok(unsafe { crate::bash::complete::candidates(line, start, pos) })
     }
@@ -59,26 +60,41 @@ impl<S: CandidateSource> BashCompleter<S> {
 }
 
 /// Turn candidates into [`reedline::Suggestion`]s.
-fn to_suggestions(
-    candidates: Vec<String>,
-    line: &str,
-    start: usize,
-    pos: usize,
-) -> Vec<Suggestion> {
+fn to_suggestions(candidates: Candidates, line: &str, start: usize, pos: usize) -> Vec<Suggestion> {
     let current_word = &line[start..pos];
     let span = Span::new(start, pos);
+    let Candidates {
+        matches,
+        quote,
+        append,
+    } = candidates;
 
-    candidates
+    matches
         .into_iter()
-        .map(|candidate| Suggestion {
-            value: words::quote_candidate(&candidate, current_word),
-            display_override: Some(candidate.clone()),
-            description: None,
-            style: None,
-            extra: None,
-            span,
-            append_whitespace: !candidate.ends_with('/'),
-            match_indices: None,
+        .map(|candidate| {
+            let mut value = if quote {
+                words::quote_candidate(&candidate, current_word)
+            } else {
+                candidate.clone()
+            };
+            // reedline can only add a space, any other character
+            // bash needs goes into the word itself.
+            let mut whitespace = false;
+            match append {
+                Some(' ') => whitespace = !candidate.ends_with('/'),
+                Some(character) if !value.ends_with(character) => value.push(character),
+                _ => {}
+            }
+            Suggestion {
+                value,
+                display_override: Some(candidate),
+                description: None,
+                style: None,
+                extra: None,
+                span,
+                append_whitespace: whitespace,
+                match_indices: None,
+            }
         })
         .collect()
 }
@@ -117,6 +133,9 @@ mod tests {
         answers: Vec<String>,
         asked: Vec<(String, usize)>,
         fail: bool,
+        /// What bash would have reported alongside the matches.
+        quote: bool,
+        append: Option<char>,
     }
 
     impl FakeSource {
@@ -125,6 +144,8 @@ mod tests {
                 answers: answers.iter().map(|s| s.to_string()).collect(),
                 asked: Vec::new(),
                 fail: false,
+                quote: true,
+                append: Some(' '),
             }
         }
     }
@@ -135,12 +156,16 @@ mod tests {
             " \t\n\"'><=;|&(:".to_string()
         }
 
-        fn candidates(&mut self, line: &str, _start: usize, pos: usize) -> io::Result<Vec<String>> {
+        fn candidates(&mut self, line: &str, _start: usize, pos: usize) -> io::Result<Candidates> {
             self.asked.push((line.to_string(), pos));
             if self.fail {
                 return Err(io::Error::other("source failed"));
             }
-            Ok(self.answers.clone())
+            Ok(Candidates {
+                matches: self.answers.clone(),
+                quote: self.quote,
+                append: self.append,
+            })
         }
     }
 
@@ -228,6 +253,36 @@ mod tests {
             result.suggestions()[1].append_whitespace,
             "file should end the word"
         );
+    }
+
+    #[test]
+    fn a_candidate_bash_does_not_want_quoted_is_left_alone() {
+        let mut source = FakeSource::new(&["$HISTFILE"]);
+        source.quote = false;
+        let mut completer = BashCompleter::new(source);
+        let result = completer.complete("echo $HISTFIL", 13);
+        assert_eq!(values(&result), vec!["$HISTFILE"]);
+    }
+
+    #[test]
+    fn the_character_bash_asks_for_finishes_the_word() {
+        // `$HOME` names a directory, so bash asks for a `/` rather than a space.
+        let mut source = FakeSource::new(&["$HOME"]);
+        source.quote = false;
+        source.append = Some('/');
+        let mut completer = BashCompleter::new(source);
+        let result = completer.complete("echo $HOM", 9);
+        let suggestion = &result.suggestions()[0];
+        assert_eq!(suggestion.value, "$HOME/");
+        assert!(!suggestion.append_whitespace, "the slash already ended it");
+    }
+
+    #[test]
+    fn a_suppressed_append_leaves_the_word_open() {
+        let mut source = FakeSource::new(&["alpha"]);
+        source.append = None;
+        let mut completer = BashCompleter::new(source);
+        assert!(!completer.complete("git a", 5).suggestions()[0].append_whitespace);
     }
 
     #[test]

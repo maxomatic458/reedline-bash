@@ -5,11 +5,20 @@ use super::symbols;
 use crate::grammar::quoting::{QuoteType, dequoting_function_rust, find_quote_type};
 use std::ffi::{CStr, CString, c_char, c_int, c_ulong};
 
+/// How readline would have finished the word.
+pub struct Candidates {
+    pub matches: Vec<String>,
+    /// Whether a match still has to be quoted. Readlines `QUOTING_DESIRED`
+    pub quote: bool,
+    /// appended to a lone match.
+    pub append: Option<char>,
+}
+
 /// Candidates for the word between `word_start` and `point`.
 ///
 /// # Safety
 /// Calls into bash.
-pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Vec<String> {
+pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candidates {
     let point = point.min(line.len());
     let word_start = word_start.min(point);
     let word = &line[word_start..point];
@@ -29,7 +38,12 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Vec<Str
 
     let (Ok(c_word), Ok(c_command)) = (CString::new(bare_word.as_str()), CString::new(command))
     else {
-        return Vec::new(); // NUL cannot be typed and C strings dont contain it.
+        // NUL cannot be typed and C strings dont contain it.
+        return Candidates {
+            matches: Vec::new(),
+            quote: false,
+            append: None,
+        };
     };
 
     unsafe {
@@ -105,6 +119,17 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Vec<Str
         // happens to be in the cwd.
         let filenames = symbols::rl_filename_completion_desired != 0;
 
+        let quote = symbols::rl_full_quoting_desired != 0
+            || (filenames && symbols::rl_filename_quoting_desired != 0);
+        let append = if symbols::rl_completion_suppress_append == 0 {
+            u8::try_from(symbols::rl_completion_append_character)
+                .ok()
+                .filter(|&byte| byte != 0)
+                .map(char::from)
+        } else {
+            None
+        };
+
         symbols::rl_readline_state &= !RL_STATE_COMPLETING;
 
         // Both of these can turn two different strings into one, so the
@@ -114,7 +139,11 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Vec<Str
             mark_directories(&mut result);
         }
         dedupe(&mut result);
-        result
+        Candidates {
+            matches: result,
+            quote,
+            append,
+        }
     }
 }
 

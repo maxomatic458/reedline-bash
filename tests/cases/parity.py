@@ -6,7 +6,7 @@ the two have to agree. Native bash is the specification.
 
 import os
 
-from harness import UP, ctrl, shell, test
+from harness import TAB, UP, ctrl, shell, test
 
 
 def both(script, **kw):
@@ -170,6 +170,28 @@ def test_a_space_prefixed_command_without_histcontrol():
         sh.run("echo kept")
         sh.run(" echo hidden")
         return recall(sh, 3)
+
+    ours, native = both(script)
+    assert ours == native, (ours, native)
+
+
+@test
+def test_completing_a_variable_leaves_the_dollar_alone():
+    def script(sh):
+        sh.type("echo $HISTFIL")
+        sh.press(TAB)
+        return sh.line
+
+    ours, native = both(script)
+    assert ours == native, (ours, native)
+
+
+@test
+def test_completing_a_variable_that_is_a_directory_marks_it():
+    def script(sh):
+        sh.type("echo $HOM")
+        sh.press(TAB)
+        return sh.line
 
     ours, native = both(script)
     assert ours == native, (ours, native)

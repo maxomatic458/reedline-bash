@@ -110,7 +110,8 @@ extern "C" fn call(words: *const symbols::WordList) -> c_int {
                 let point = line.len();
                 let start =
                     words::word_start_with_breaks(&line, point, &bash::complete::word_breaks());
-                for candidate in unsafe { bash::complete::candidates(&line, start, point) } {
+                for candidate in unsafe { bash::complete::candidates(&line, start, point) }.matches
+                {
                     println!("{candidate}");
                 }
                 0

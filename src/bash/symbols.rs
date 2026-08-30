@@ -455,6 +455,13 @@ unsafe extern "C" {
     /// [`readline.h:812`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/lib/readline/readline.h?h=bash-5.3#n812
     pub static mut rl_filename_quoting_desired: c_int;
 
+    /// `extern int rl_full_quoting_desired;` — [`readline.h:815`]. The other
+    /// half of readline's `QUOTING_DESIRED`, which decides whether a match is
+    /// quoted at all.
+    ///
+    /// [`readline.h:815`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/lib/readline/readline.h?h=bash-5.3#n815
+    pub static mut rl_full_quoting_desired: c_int;
+
     /// `extern int rl_sort_completion_matches;` — [`readline.h:875`]
     ///
     /// [`readline.h:875`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/lib/readline/readline.h?h=bash-5.3#n875
