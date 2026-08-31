@@ -242,3 +242,24 @@ def test_click_to_move_needs_both_settings():
 def test_the_kitty_protocol_is_not_forced_on():
     with shell() as sh:
         assert ">1u" not in sh.raw, "keyboard enhancement requested without asking"
+
+
+@test
+def test_a_keybinding_runs_a_command_the_way_bind_x_does():
+    """Bash's `bind -x`, which readline is no longer around to provide."""
+    config = """
+[[keybinding]]
+key = "f4"
+event = { ExecuteHostCommand = "echo ran_from_a_key" }
+"""
+    with shell(config=config) as sh:
+        sh.run("echo before")
+        sh.type("half typed")
+        sh.press(fkey(4))
+        sh.settle()
+        assert "ran_from_a_key" in sh.text, sh.screen
+        assert sh.line == "half typed", "the line being typed should survive"
+
+        sh.press(ctrl("u"))
+        listed = " ".join(sh.run("history"))
+        assert "echo ran_from_a_key" not in listed, listed

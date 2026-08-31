@@ -181,6 +181,22 @@ pub const BUILTIN_ENABLED: c_int = 0x01;
 
 pub const EOF: c_int = -1;
 
+/// ```c
+/// #define SEVAL_NOHIST	0x004
+/// ```
+/// [`builtins/common.h:46`] — keep the command out of the history.
+///
+/// [`builtins/common.h:46`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/builtins/common.h?h=bash-5.3#n46
+pub const SEVAL_NOHIST: c_int = 0x004;
+
+/// ```c
+/// #define SEVAL_NOTIFY	0x800		/* want job notifications */
+/// ```
+/// [`builtins/common.h:55`]
+///
+/// [`builtins/common.h:55`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/builtins/common.h?h=bash-5.3#n55
+pub const SEVAL_NOTIFY: c_int = 0x800;
+
 // Safety for the statics below: the process is single-threaded -- nothing here
 // spawns a thread and neither does reedline as configured -- so these are only
 // ever touched from the thread bash calls into us on.
@@ -367,6 +383,32 @@ unsafe extern "C" {
     ///
     /// [`lib/readline/history.h:136`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/lib/readline/history.h?h=bash-5.3#n136
     pub fn history_list() -> *mut *mut HistoryEntry;
+
+    /// ```c
+    /// extern int parse_and_execute (char *, const char *, int);
+    /// ```
+    /// [`builtins/common.h:135`] — what `bind -x` runs its command with. Takes
+    /// the string, and frees it unless `SEVAL_NOFREE`.
+    ///
+    /// [`builtins/common.h:135`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/builtins/common.h?h=bash-5.3#n135
+    pub fn parse_and_execute(string: *mut c_char, from_file: *const c_char, flags: c_int) -> c_int;
+
+    /// ```c
+    /// extern void save_parser_state (sh_parser_state_t *);
+    /// ```
+    /// [`externs.h:396`] — the parser is mid-line while it waits on us, so
+    /// running a command underneath it has to leave that state alone.
+    ///
+    /// [`externs.h:396`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/externs.h?h=bash-5.3#n396
+    pub fn save_parser_state(state: *mut c_void) -> *mut c_void;
+
+    /// ```c
+    /// extern void restore_parser_state (sh_parser_state_t *);
+    /// ```
+    /// [`externs.h:397`]
+    ///
+    /// [`externs.h:397`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/externs.h?h=bash-5.3#n397
+    pub fn restore_parser_state(state: *mut c_void);
 
     /// ```c
     /// extern int history_length;
@@ -606,4 +648,35 @@ pub unsafe fn expand_tilde(path: &str) -> Option<String> {
         .into_owned();
     unsafe { xfree(expanded as *mut c_void) };
     Some(text)
+}
+
+/// Room for a `sh_parser_state_t`
+#[repr(align(16))]
+struct ParserState([u8; 4096]);
+
+/// Run `command` the way bash's `bind -x` does
+///
+/// # Safety
+/// Calls into bash; must run on the thread bash called into us on.
+pub unsafe fn run_host_command(command: &str) -> c_int {
+    unsafe {
+        let owned = bash_strdup(command);
+        if owned.is_null() {
+            return 1;
+        }
+        let mut state = ParserState([0; 4096]);
+        let saved = state.0.as_mut_ptr().cast();
+        save_parser_state(saved);
+
+        // Mirrors `bash_execute_unix_command`.
+        let flags = if interactive_shell != 0 {
+            SEVAL_NOTIFY | SEVAL_NOHIST
+        } else {
+            SEVAL_NOHIST
+        };
+        let status = parse_and_execute(owned, c"reedline".as_ptr(), flags);
+
+        restore_parser_state(saved);
+        status
+    }
 }

@@ -42,14 +42,26 @@ impl Editor {
         self.reload_if_config_changed();
         self.take_terminal();
 
-        let prompt = BashPrompt::new(&expand("PS1"), &expand("PS2"));
-        match self.line_editor.read_line(&prompt) {
-            Ok(Signal::Success(line)) => Some(line),
-            // Abandoned, not submitted: an empty command gets a fresh prompt.
-            Ok(Signal::CtrlC) => Some(String::new()),
-            Ok(Signal::CtrlD) => None,
-            Ok(_) => Some(String::new()),
-            Err(_) => None,
+        loop {
+            // Re-expanded each time round: a command may have changed the
+            // directory, or anything else the prompt shows.
+            let prompt = BashPrompt::new(&expand("PS1"), &expand("PS2"));
+            return match self.line_editor.read_line(&prompt) {
+                Ok(Signal::Success(line)) => Some(line),
+                // reedlines equivalent of bash's `bind -x`:
+                Ok(Signal::HostCommand(command)) => {
+                    // reedline resumes on the prompt it suspended,
+                    // print a newline so the command output doesn't overwrite it.
+                    println!();
+                    unsafe { symbols::run_host_command(&command) };
+                    continue;
+                }
+                // Abandoned, not submitted: an empty command gets a fresh prompt.
+                Ok(Signal::CtrlC) => Some(String::new()),
+                Ok(Signal::CtrlD) => None,
+                Ok(_) => Some(String::new()),
+                Err(_) => None,
+            };
         }
     }
 
