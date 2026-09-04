@@ -8,9 +8,13 @@ use reedline::{
 };
 use reedline::{InputMode, OutputMode};
 
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+
 use crate::bash::symbols;
 use crate::{
-    completer::{BashCompleter, BashSource},
+    completer::{BashCompleter, BashSource, PromptCount},
     config, highlighter, history,
     prompt::BashPrompt,
     validator::BashValidator,
@@ -20,6 +24,9 @@ use crossterm::cursor::SetCursorStyle;
 pub struct Editor {
     line_editor: Reedline,
     config_stamp: Option<Stamp>,
+    prompt_count: PromptCount,
+    /// The terminal is closed. Nothing more will be read.
+    closed: bool,
 }
 
 /// Last modified + file size of the config file to detect changes.
@@ -28,24 +35,37 @@ type Stamp = (std::time::SystemTime, u64);
 impl Editor {
     pub fn new() -> (Self, Vec<config::Warning>) {
         let (settings, warnings) = config::Config::load();
+        let prompt_count = PromptCount::default();
         (
             Editor {
-                line_editor: build(&settings),
+                line_editor: build(&settings, &prompt_count),
                 config_stamp: config_stamp(),
+                prompt_count,
+                closed: false,
             },
             warnings,
         )
     }
 
-    /// `None` will exit the shell
+    /// The next line, or `None` for an end of input.
+    ///
+    /// Bash decides what an end of input means
     pub fn read_line(&mut self) -> Option<String> {
+        #[cfg(debug_assertions)]
+        if std::env::var_os("REEDLINE_BASH_TEST_PANIC").is_some() {
+            panic!("REEDLINE_BASH_TEST_PANIC is set");
+        }
+        if self.closed {
+            return None;
+        }
         self.reload_if_config_changed();
         self.take_terminal();
 
         loop {
-            // Re-expanded each time round: a command may have changed the
+            self.prompt_count.fetch_add(1, Ordering::Relaxed);
+            // Fetched each time round: a command may have changed the
             // directory, or anything else the prompt shows.
-            let prompt = BashPrompt::new(&expand("PS1"), &expand("PS2"));
+            let prompt = BashPrompt::new(&primary_prompt(), &secondary_prompt());
             return match self.line_editor.read_line(&prompt) {
                 Ok(Signal::Success(line)) => Some(line),
                 // reedlines equivalent of bash's `bind -x`:
@@ -56,11 +76,18 @@ impl Editor {
                     unsafe { symbols::run_host_command(&command) };
                     continue;
                 }
-                // Abandoned, not submitted: an empty command gets a fresh prompt.
-                Ok(Signal::CtrlC) => Some(String::new()),
+                // Abandoned, not submitted: an empty command gets a fresh
+                // prompt.
+                Ok(Signal::CtrlC) => {
+                    unsafe { symbols::set_exit_status(128 + SIGINT) };
+                    Some(String::new())
+                }
                 Ok(Signal::CtrlD) => None,
                 Ok(_) => Some(String::new()),
-                Err(_) => None,
+                Err(_) => {
+                    self.closed = true;
+                    None
+                }
             };
         }
     }
@@ -75,7 +102,7 @@ impl Editor {
         for warning in &warnings {
             eprintln!("reedline-bash: {warning}");
         }
-        self.line_editor = build(&settings);
+        self.line_editor = build(&settings, &self.prompt_count);
     }
 
     /// claim back the terminal from a foreground job that ended.
@@ -88,6 +115,17 @@ impl Editor {
     }
 }
 
+/// The prompt bash decoded for this read: `PS1`, or `PS2` when bash
+/// wants a continuation line.
+fn primary_prompt() -> String {
+    unsafe { symbols::current_prompt() }.unwrap_or_else(|| expand("PS1"))
+}
+
+/// `PS2`, drawn by reedline before every continuation line.
+fn secondary_prompt() -> String {
+    expand("PS2")
+}
+
 /// Expand a prompt variable the way bash does.
 fn expand(name: &str) -> String {
     let raw = unsafe { symbols::shell_variable(name) }.unwrap_or_default();
@@ -97,18 +135,31 @@ fn expand(name: &str) -> String {
     unsafe { symbols::expand_prompt(&raw) }.unwrap_or(raw)
 }
 
+const SIGINT: std::os::raw::c_int = 2;
+
+/// Where Ctrl-O writes the line for the editor to open.
+fn buffer_file(runtime_dir: Option<&Path>, pid: u32) -> PathBuf {
+    runtime_dir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(std::env::temp_dir)
+        .join(format!("reedline-bash-{pid}.sh"))
+}
+
 fn config_stamp() -> Option<Stamp> {
     let path = config::path()?;
     let meta = std::fs::metadata(path).ok()?;
     Some((meta.modified().ok()?, meta.len()))
 }
 
-fn build(config: &config::Config) -> Reedline {
+fn build(config: &config::Config, prompt_count: &PromptCount) -> Reedline {
     let mut editor = Reedline::create()
         .with_edit_mode(edit_mode(config))
         .with_menu(menu(config))
         .with_highlighter(highlighter::for_config(config.highlight, &config.palette))
-        .with_completer(Box::new(BashCompleter::new(BashSource)))
+        .with_completer(Box::new(BashCompleter::new(
+            BashSource,
+            Arc::clone(prompt_count),
+        )))
         .with_validator(Box::new(BashValidator))
         .with_history(Box::new(history::BashHistory::new(
             history::BashSource,
@@ -148,9 +199,12 @@ fn build(config: &config::Config) -> Reedline {
         if let Some(program) = parts.next() {
             let mut command = std::process::Command::new(program);
             command.args(parts);
+            let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from);
             editor = editor.with_buffer_editor(
                 command,
-                std::env::temp_dir().join("reedline-bash-buffer.sh"),
+                buffer_file(runtime_dir.as_deref(), std::process::id()),
             );
         }
     }
@@ -332,4 +386,25 @@ fn menu(config: &config::Config) -> ReedlineMenu {
         }
     };
     ReedlineMenu::EngineCompleter(inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_buffer_file_is_private_to_the_user_and_the_shell() {
+        let runtime = Path::new("/run/user/1000");
+        let path = buffer_file(Some(runtime), 4242);
+        assert!(path.starts_with(runtime), "{path:?}");
+        assert!(path.to_string_lossy().contains("4242"), "{path:?}");
+        assert_ne!(buffer_file(Some(runtime), 1), buffer_file(Some(runtime), 2));
+    }
+
+    #[test]
+    fn without_a_runtime_dir_the_buffer_file_still_names_the_shell() {
+        let path = buffer_file(None, 77);
+        assert!(path.starts_with(std::env::temp_dir()), "{path:?}");
+        assert!(path.to_string_lossy().contains("77"), "{path:?}");
+    }
 }

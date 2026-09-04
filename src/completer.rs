@@ -2,6 +2,7 @@
 
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use reedline::{Completer, CompletionResult, Span, Suggestion, Suggestions};
 
@@ -30,32 +31,47 @@ impl CandidateSource for BashSource {
     }
 }
 
+/// Counts prompts
+pub type PromptCount = Arc<AtomicU64>;
+
 pub struct BashCompleter<S: CandidateSource> {
     source: S,
     /// `true` if the source failed.
     dead: bool,
-    /// The last answer + line + cursor it was computed for.
-    ///
-    /// reedline reasks on menu open, so we memoize the last answer.
-    /// e.g opening menu, tab, closing, opening tab again -> uses memo
-    memo: Option<(String, usize, Suggestions)>,
+    /// Which prompt this is.
+    prompt_count: PromptCount,
+    /// The last answer, reused when the same question is asked again.
+    memo: Option<Memo>,
+}
+
+/// One remembered completion.
+struct Memo {
+    /// The prompt the answer was computed at. See [`PromptCount`].
+    prompt_count: u64,
+    /// The whole line as it was.
+    line: String,
+    /// The cursor position in that line (byte offset).
+    pos: usize,
+    /// Completions of the shell.
+    suggestions: Suggestions,
 }
 
 impl<S: CandidateSource> BashCompleter<S> {
-    pub fn new(source: S) -> Self {
+    pub fn new(source: S, prompt_count: PromptCount) -> Self {
         BashCompleter {
             source,
             dead: false,
+            prompt_count,
             memo: None,
         }
     }
 
     fn memoized(&self, line: &str, pos: usize) -> Option<Suggestions> {
+        let now = self.prompt_count.load(Ordering::Relaxed);
         self.memo
             .as_ref()
-            .and_then(|(cached_line, cached_pos, suggestions)| {
-                (cached_line == line && *cached_pos == pos).then(|| Arc::clone(suggestions))
-            })
+            .filter(|memo| memo.prompt_count == now && memo.line == line && memo.pos == pos)
+            .map(|memo| Arc::clone(&memo.suggestions))
     }
 }
 
@@ -120,7 +136,12 @@ impl<S: CandidateSource> Completer for BashCompleter<S> {
         };
 
         let suggestions: Suggestions = to_suggestions(candidates, line, start, pos).into();
-        self.memo = Some((line.to_string(), pos, Arc::clone(&suggestions)));
+        self.memo = Some(Memo {
+            prompt_count: self.prompt_count.load(Ordering::Relaxed),
+            line: line.to_string(),
+            pos,
+            suggestions: Arc::clone(&suggestions),
+        });
         CompletionResult::fresh(suggestions)
     }
 }
@@ -179,7 +200,10 @@ mod tests {
 
     #[test]
     fn candidates_replace_the_word_under_the_cursor() {
-        let mut completer = BashCompleter::new(FakeSource::new(&["checkout", "cherry"]));
+        let mut completer = BashCompleter::new(
+            FakeSource::new(&["checkout", "cherry"]),
+            PromptCount::default(),
+        );
         let result = completer.complete("git che", 7);
         let spans: Vec<_> = result.suggestions().iter().map(|s| s.span).collect();
         assert!(spans.iter().all(|s| *s == Span::new(4, 7)), "{spans:?}");
@@ -188,7 +212,7 @@ mod tests {
 
     #[test]
     fn an_identical_question_is_answered_from_the_memo() {
-        let mut completer = BashCompleter::new(FakeSource::new(&["alpha"]));
+        let mut completer = BashCompleter::new(FakeSource::new(&["alpha"]), PromptCount::default());
         for _ in 0..5 {
             assert_eq!(values(&completer.complete("git a", 5)), vec!["alpha"]);
         }
@@ -200,8 +224,22 @@ mod tests {
     }
 
     #[test]
+    fn a_new_prompt_asks_again_even_for_the_same_question() {
+        // `cd` between two prompts, or a file created by the command that ran
+        // in between: the same line at the same cursor has a different answer.
+        let prompt_count = PromptCount::default();
+        let mut completer =
+            BashCompleter::new(FakeSource::new(&["alpha"]), Arc::clone(&prompt_count));
+        completer.complete("cat a", 5);
+        completer.complete("cat a", 5);
+        prompt_count.fetch_add(1, Ordering::Relaxed);
+        completer.complete("cat a", 5);
+        assert_eq!(completer.source.asked.len(), 2);
+    }
+
+    #[test]
     fn a_changed_line_or_cursor_asks_again() {
-        let mut completer = BashCompleter::new(FakeSource::new(&["alpha"]));
+        let mut completer = BashCompleter::new(FakeSource::new(&["alpha"]), PromptCount::default());
         completer.complete("git a", 5);
         completer.complete("git a", 4); // same line, cursor moved
         completer.complete("git b", 5); // same cursor, line changed
@@ -221,7 +259,7 @@ mod tests {
     fn a_failing_source_is_asked_once_and_then_left_alone() {
         let mut source = FakeSource::new(&["alpha"]);
         source.fail = true;
-        let mut completer = BashCompleter::new(source);
+        let mut completer = BashCompleter::new(source, PromptCount::default());
         for _ in 0..5 {
             assert!(completer.complete("git a", 5).suggestions().is_empty());
         }
@@ -234,7 +272,10 @@ mod tests {
 
     #[test]
     fn candidates_needing_quotes_are_quoted_but_still_display_plainly() {
-        let mut completer = BashCompleter::new(FakeSource::new(&["name with spaces.txt"]));
+        let mut completer = BashCompleter::new(
+            FakeSource::new(&["name with spaces.txt"]),
+            PromptCount::default(),
+        );
         let result = completer.complete("cat na", 6);
         let suggestion = &result.suggestions()[0];
         assert_eq!(suggestion.value, r"name\ with\ spaces.txt");
@@ -243,7 +284,10 @@ mod tests {
 
     #[test]
     fn a_directory_candidate_chains_instead_of_ending_the_word() {
-        let mut completer = BashCompleter::new(FakeSource::new(&["subdir/", "file.txt"]));
+        let mut completer = BashCompleter::new(
+            FakeSource::new(&["subdir/", "file.txt"]),
+            PromptCount::default(),
+        );
         let result = completer.complete("cat s", 5);
         assert!(
             !result.suggestions()[0].append_whitespace,
@@ -259,7 +303,7 @@ mod tests {
     fn a_candidate_bash_does_not_want_quoted_is_left_alone() {
         let mut source = FakeSource::new(&["$HISTFILE"]);
         source.quote = false;
-        let mut completer = BashCompleter::new(source);
+        let mut completer = BashCompleter::new(source, PromptCount::default());
         let result = completer.complete("echo $HISTFIL", 13);
         assert_eq!(values(&result), vec!["$HISTFILE"]);
     }
@@ -270,7 +314,7 @@ mod tests {
         let mut source = FakeSource::new(&["$HOME"]);
         source.quote = false;
         source.append = Some('/');
-        let mut completer = BashCompleter::new(source);
+        let mut completer = BashCompleter::new(source, PromptCount::default());
         let result = completer.complete("echo $HOM", 9);
         let suggestion = &result.suggestions()[0];
         assert_eq!(suggestion.value, "$HOME/");
@@ -281,13 +325,13 @@ mod tests {
     fn a_suppressed_append_leaves_the_word_open() {
         let mut source = FakeSource::new(&["alpha"]);
         source.append = None;
-        let mut completer = BashCompleter::new(source);
+        let mut completer = BashCompleter::new(source, PromptCount::default());
         assert!(!completer.complete("git a", 5).suggestions()[0].append_whitespace);
     }
 
     #[test]
     fn a_cursor_past_the_end_of_the_line_does_not_panic() {
-        let mut completer = BashCompleter::new(FakeSource::new(&["alpha"]));
+        let mut completer = BashCompleter::new(FakeSource::new(&["alpha"]), PromptCount::default());
         let result = completer.complete("git", 999);
         assert_eq!(result.suggestions()[0].span, Span::new(0, 3));
     }

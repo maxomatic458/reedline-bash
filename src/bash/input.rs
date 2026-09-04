@@ -13,9 +13,8 @@ pub struct LineFeeder<F> {
     buffer: Vec<u8>,
     position: usize,
     /// Draws the prompt and blocks. Returns the next line without terminator,
-    /// or `None` at end of input.
+    /// or `None` for an end of input.
     fetch: F,
-    at_eof: bool,
 }
 
 impl<F: FnMut() -> Option<String>> LineFeeder<F> {
@@ -24,16 +23,12 @@ impl<F: FnMut() -> Option<String>> LineFeeder<F> {
             buffer: Vec::new(),
             position: 0,
             fetch,
-            at_eof: false,
         }
     }
 
     /// The next character fed into bash, or [`symbols::EOF`].
     pub fn next_char(&mut self) -> c_int {
         if self.position >= self.buffer.len() {
-            if self.at_eof {
-                return symbols::EOF;
-            }
             match (self.fetch)() {
                 Some(line) => {
                     // We need to add the newline
@@ -41,10 +36,7 @@ impl<F: FnMut() -> Option<String>> LineFeeder<F> {
                     self.buffer.push(b'\n');
                     self.position = 0;
                 }
-                None => {
-                    self.at_eof = true;
-                    return symbols::EOF;
-                }
+                None => return symbols::EOF,
             }
         }
         let byte = self.buffer[self.position];
@@ -90,43 +82,67 @@ pub unsafe fn redirect(
     }
 }
 
-/// Install our reader into bash.
+/// The stream bash reads the terminal through.
 ///
 /// # Safety
-/// Must run from `<name>_builtin_load`.
-pub unsafe fn install(getter: symbols::GetFunc, ungetter: symbols::UngetFunc) {
+/// Reads bash's globals; must run on the thread bash called into us on.
+unsafe fn terminal_stream() -> *mut BashInput {
     unsafe {
-        // `stream_list` stacks the streams bash will pop back to, and the
-        // terminal is at the bottom.
         let mut saver = symbols::stream_list;
         if saver.is_null() {
-            // Nothing in flight: bash is reading the terminal already.
-            redirect(&raw mut symbols::bash_input, getter, ungetter);
-            return;
+            return &raw mut symbols::bash_input;
         }
         while !(*saver).next.is_null() {
             saver = (*saver).next;
         }
-        redirect(&raw mut (*saver).bash_input, getter, ungetter);
+        &raw mut (*saver).bash_input
     }
+}
+
+/// Install the reader into bash.
+///
+/// # Safety
+/// Must run from `<name>_builtin_load`.
+pub unsafe fn install(getter: symbols::GetFunc, ungetter: symbols::UngetFunc) {
+    unsafe { redirect(terminal_stream(), getter, ungetter) }
 }
 
 /// Hand the input stream back to readline.
 ///
 /// # Safety
-/// Must run from `<name>_builtin_unload`.
+/// Must run from `<name>_builtin_unload`
 pub unsafe fn restore() {
     unsafe {
-        // `with_input_from_stdin` only installs readline's reader if no stream
-        // claims `st_stdin`. Ours does, so we clear the type first. Bash checks
-        // the saved stack and pops back to it later.
-        let saver = symbols::stream_list;
-        if !saver.is_null() {
-            (*saver).bash_input.stream_type = StreamType::None;
+        let ours = terminal_stream();
+        let current = &raw mut symbols::bash_input;
+
+        // `with_input_from_stdin` installs readline's reader into `bash_input`,
+        (*ours).stream_type = StreamType::None;
+        if ours == current {
+            symbols::with_input_from_stdin();
+            return;
         }
 
-        symbols::bash_input.stream_type = StreamType::None;
+        // A file is being read through `bash_input`
+        let in_flight = std::ptr::read(current);
+        std::ptr::write(
+            current,
+            BashInput {
+                stream_type: StreamType::None,
+                name: std::ptr::null_mut(),
+                location: symbols::InputStream { buffered_fd: 0 },
+                getter: None,
+                ungetter: None,
+            },
+        );
         symbols::with_input_from_stdin();
+        let readline = std::ptr::read(current);
+        std::ptr::write(current, in_flight);
+
+        if !(*ours).name.is_null() {
+            symbols::xfree((*ours).name as *mut std::ffi::c_void);
+        }
+        std::ptr::write(ours, readline);
     }
 }
 
@@ -183,12 +199,14 @@ mod tests {
     }
 
     #[test]
-    fn eof_ends_it_and_stays_ended() {
-        let mut feeder = feeder(vec!["x"]);
+    fn eof_is_reported_once_and_the_fetcher_is_asked_again() {
+        // Bash decides what an EOF means
+        let mut answers: Vec<Option<String>> = vec![Some("x".into()), None, Some("y".into())];
+        answers.reverse();
+        let mut feeder = LineFeeder::new(move || answers.pop().flatten());
+        // The first drain stops at the EOF in the middle
         assert_eq!(drain(&mut feeder), "x\n");
-        // Once the fetcher has said None, nothing may ask it again.
-        assert_eq!(feeder.next_char(), symbols::EOF);
-        assert_eq!(feeder.next_char(), symbols::EOF);
+        assert_eq!(drain(&mut feeder), "y\n");
     }
 
     #[test]

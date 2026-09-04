@@ -200,6 +200,10 @@ size = 5000
 # [[keybinding]]
 # key = "f2"
 # event = { Menu = "completion_menu" }
+
+# [[keybinding]]
+# key = "ctrl-g"
+# event = { ExecuteHostCommand = "git status" }
 #
 # [[keybinding]]
 # key = "ctrl-shift-x"

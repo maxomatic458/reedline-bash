@@ -39,6 +39,8 @@ mod words;
 use std::os::raw::{c_char, c_int};
 use std::sync::Mutex;
 
+use crossterm::event::DisableBracketedPaste;
+
 use bash::builtin::{DocLines, guard};
 use bash::input::LineFeeder;
 use bash::symbols;
@@ -75,16 +77,29 @@ impl Editor {
 }
 
 extern "C" fn get_char() -> c_int {
-    guard(symbols::EOF, || {
-        match EDITOR.lock() {
-            Ok(mut editor) => match editor.as_mut() {
-                Some(editor) => editor.feeder.next_char(),
-                None => symbols::EOF,
-            },
-            // An earlier call panicked
-            Err(_) => symbols::EOF,
-        }
-    })
+    let read = std::panic::catch_unwind(|| {
+        // A poisoned lock means an earlier call panicked.
+        let mut slot = EDITOR.lock().ok()?;
+        Some(
+            slot.as_mut()
+                .map_or(symbols::EOF, |editor| editor.feeder.next_char()),
+        )
+    });
+    match read {
+        Ok(Some(c)) => c,
+        _ => hand_back_to_readline(),
+    }
+}
+
+/// The editor failed. Return control to readline
+fn hand_back_to_readline() -> c_int {
+    eprintln!("reedline-bash: the editor failed, falling back to readline");
+    *EDITOR
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    let _ = crossterm::execute!(std::io::stdout(), DisableBracketedPaste);
+    unsafe { bash::input::restore() };
+    c_int::from(b'\n')
 }
 
 extern "C" fn unget_char(c: c_int) -> c_int {

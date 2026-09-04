@@ -521,6 +521,80 @@ unsafe extern "C" {
     ///
     /// [`readline.h:838`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/lib/readline/readline.h?h=bash-5.3#n838
     pub static mut rl_attempted_completion_over: c_int;
+
+    /// ```c
+    /// extern void rl_replace_line (const char *, int);
+    /// ```
+    /// [`lib/readline/readline.h:425`] — put text into `rl_line_buffer`, growing
+    /// it through readline's own `rl_line_buffer_len` bookkeeping. Swapping the
+    /// pointer for a smaller allocation leaves that length stale, and the next
+    /// `read -e` writes past the end.
+    ///
+    /// [`lib/readline/readline.h:425`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/lib/readline/readline.h?h=bash-5.3#n425
+    pub fn rl_replace_line(text: *const c_char, clear_undo: c_int);
+
+    /// ```c
+    /// extern void bashline_set_filename_hooks (void);
+    /// ```
+    /// [`bashline.h:58`] — the hooks readline's filename completion calls back
+    /// into bash through: expanding `$VAR` and `~` in a directory name, and
+    /// `direxpand`. Bash installs them at the top of `attempt_shell_completion`.
+    ///
+    /// [`bashline.h:58`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/bashline.h?h=bash-5.3#n58
+    pub fn bashline_set_filename_hooks();
+
+    /// ```c
+    /// extern void set_exit_status (int);
+    /// ```
+    /// [`externs.h:85`] — `$?` and `PIPESTATUS`.
+    ///
+    /// [`externs.h:85`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/externs.h?h=bash-5.3#n85
+    pub fn set_exit_status(status: c_int);
+
+    /// ```c
+    /// extern int prog_completion_enabled;
+    /// ```
+    /// [`pcomplete.h:118`] — `shopt progcomp`.
+    ///
+    /// [`pcomplete.h:118`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/pcomplete.h?h=bash-5.3#n118
+    pub static mut prog_completion_enabled: c_int;
+
+    /// ```c
+    /// int force_fignore = 1;
+    /// ```
+    /// [`bashline.c:292`] — `shopt force_fignore`: when off, a `FIGNORE` that
+    /// would leave no match is not applied.
+    ///
+    /// [`bashline.c:292`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/bashline.c?h=bash-5.3#n292
+    pub static mut force_fignore: c_int;
+
+    /// ```c
+    /// char *current_readline_prompt = (char *)NULL;
+    /// ```
+    /// [`parse.y:1651`] — the prompt bash decoded for the line it is about to
+    /// read: `PS1`, or `PS2` when the parser wants a continuation. `prompt_again`
+    /// fills it before every read from an `st_stdin` stream, ours included, so
+    /// decoding `PS1` again would run its command substitutions twice.
+    ///
+    /// [`parse.y:1651`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/parse.y?h=bash-5.3#n1651
+    pub static mut current_readline_prompt: *mut c_char;
+}
+
+/// The prompt bash decoded for the line it is asking for, or `None` before it
+/// has decoded one.
+///
+/// # Safety
+/// Reads bash's globals; must run on the thread bash called into us on.
+pub unsafe fn current_prompt() -> Option<String> {
+    let prompt = unsafe { current_readline_prompt };
+    if prompt.is_null() {
+        return None;
+    }
+    Some(
+        unsafe { std::ffi::CStr::from_ptr(prompt) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 /// Copy `text` into an allocation bash is allowed to free.
@@ -655,6 +729,10 @@ pub unsafe fn expand_tilde(path: &str) -> Option<String> {
 struct ParserState([u8; 4096]);
 
 /// Run `command` the way bash's `bind -x` does
+///
+/// An `exit` in there makes bash `longjmp` to its top level, straight over
+/// the Rust frames between here and `get_char`. Bash does the same to itself
+/// under `bind -x`; the shell is ending either way.
 ///
 /// # Safety
 /// Calls into bash; must run on the thread bash called into us on.

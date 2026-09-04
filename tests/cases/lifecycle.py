@@ -1,6 +1,6 @@
 import os
 
-from harness import ctrl, shell, test
+from harness import TAB, Shell, Skipped, ctrl, shell, test
 from harness.shell import LIB
 
 
@@ -154,3 +154,91 @@ def test_a_command_that_reads_stdin_gets_the_terminal():
         sh.press("\r")
         sh.wait_prompt()
         assert sh.run("echo $answer") == ["typed_in"]
+
+
+@test
+def test_ctrl_d_with_a_stopped_job_warns_and_only_a_second_one_exits():
+    """Bash answers the first EOF with \"There are stopped jobs.\""""
+    with shell() as sh:
+        sh.type("sleep 30")
+        sh.press("\r", settle=False)
+        sh.settle()
+        sh.press(ctrl("z"))
+        sh.wait_prompt()
+        sh.send(ctrl("d"))
+        sh.wait_prompt()
+        assert not sh.wait_exit(timeout=1), "the shell exited with a stopped job"
+        assert "There are stopped jobs" in sh.text, sh.screen
+        assert any("Stopped" in row for row in sh.run("jobs")), sh.output()
+        sh.send(ctrl("d"))
+        assert sh.wait_exit(), "a second Ctrl-D should end the shell"
+
+
+@test
+def test_ignoreeof_keeps_the_shell_alive():
+    with shell(rc="set -o ignoreeof") as sh:
+        sh.send(ctrl("d"))
+        sh.wait_prompt()
+        assert not sh.wait_exit(timeout=1), "the shell exited despite ignoreeof"
+        assert "to leave the shell" in sh.text, sh.screen
+        assert sh.run("echo alive") == ["alive"]
+
+
+@test
+def test_unloading_from_a_sourced_file_hands_the_shell_back_to_readline():
+    """`enable -d reedline` from inside `source`"""
+    with shell() as sh:
+        sh.run("printf 'enable -d reedline\\necho inside_after_unload\\n' > \"$HOME/f\"")
+        sh.type('source "$HOME/f"; echo after_source')
+        sh.send("\r")
+        sh.attached = False
+        sh.wait_prompt()
+        assert not sh.wait_exit(timeout=1), "the shell died"
+        rows = " ".join(sh.rows)
+        assert "inside_after_unload" in rows, sh.screen
+        assert "after_source" in rows, sh.screen
+        assert sh.run("echo readline_now") == ["readline_now"]
+
+
+@test
+def test_a_crash_in_the_editor_hands_the_shell_to_readline():
+    """A bug in the editor must not end the user's shell."""
+    sh = Shell(env={"REEDLINE_BASH_TEST_PANIC": "1"})
+    sh.attached = False
+    with sh:
+        assert not sh.wait_exit(timeout=1), "the shell exited after the editor failed"
+        assert "reedline-bash" in sh.text, sh.screen
+        assert sh.run("echo alive") == ["alive"]
+        # Readline is not left in raw mode: the line is echoed and editable.
+        assert sh.run("stty -a | grep -o -- '-\\?icanon'") == ["icanon"]
+
+
+MALLOC_DEBUG = "/lib/x86_64-linux-gnu/libc_malloc_debug.so.0"
+
+
+@test
+def test_read_e_after_a_completion_does_not_corrupt_the_heap():
+    """Completion publishes the line into readline's `rl_line_buffer`."""
+    if not os.path.exists(MALLOC_DEBUG):
+        raise Skipped("glibc's malloc debugging library is not installed")
+    from harness import scratch
+
+    workdir = scratch()
+    open(os.path.join(workdir, "alpha.txt"), "w").close()
+    env = {"LD_PRELOAD": MALLOC_DEBUG, "MALLOC_CHECK_": "3"}
+    with shell(rc="bind 'set bell-style none'", cwd=workdir, env=env) as sh:
+        sh.type("cat a")
+        sh.press(TAB)
+        sh.press(ctrl("c"))
+        sh.wait_prompt()
+        sh.type("read -e v")
+        sh.press("\r", settle=False)
+        sh.settle()
+        sh.send("x" * 600 + "\r")
+        sh.wait_prompt()
+        assert sh.run("echo ${#v}") == ["600"]
+        sh.type("cat a")
+        sh.press(TAB)
+        sh.press(ctrl("c"))
+        sh.wait_prompt()
+        assert not sh.wait_exit(timeout=1), "the shell aborted"

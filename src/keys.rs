@@ -13,8 +13,7 @@ pub fn parse(spec: &str) -> Result<(KeyModifiers, KeyCode), String> {
     }
 
     // "-" and "ctrl--" bind the dash itself.
-    let lowered = spec.to_ascii_lowercase();
-    let mut parts: Vec<&str> = lowered.split('-').collect();
+    let mut parts: Vec<&str> = spec.split('-').collect();
     let mut key = parts.pop().unwrap_or_default();
     if key.is_empty() {
         key = "-";
@@ -25,7 +24,7 @@ pub fn parse(spec: &str) -> Result<(KeyModifiers, KeyCode), String> {
 
     let mut modifiers = KeyModifiers::NONE;
     for part in parts {
-        modifiers |= match part {
+        modifiers |= match part.to_ascii_lowercase().as_str() {
             "ctrl" | "control" => KeyModifiers::CONTROL,
             "alt" | "meta" => KeyModifiers::ALT,
             "shift" => KeyModifiers::SHIFT,
@@ -34,10 +33,23 @@ pub fn parse(spec: &str) -> Result<(KeyModifiers, KeyCode), String> {
         };
     }
 
-    Ok((modifiers, keycode(key, spec)?))
+    let mut code = keycode(key, spec)?;
+    // shift-x is reported as "X"
+    if let KeyCode::Char(c) = code
+        && c.is_ascii_uppercase()
+    {
+        if modifiers == KeyModifiers::NONE {
+            modifiers = KeyModifiers::SHIFT;
+        }
+        code = KeyCode::Char(c.to_ascii_lowercase());
+    }
+
+    Ok((modifiers, code))
 }
 
 fn keycode(name: &str, spec: &str) -> Result<KeyCode, String> {
+    let lowered = name.to_ascii_lowercase();
+    let name = lowered.as_str();
     // Function keys first, since "f1" would otherwise be two characters.
     if let Some(number) = name.strip_prefix('f')
         && let Ok(number) = number.parse::<u8>()
@@ -63,14 +75,23 @@ fn keycode(name: &str, spec: &str) -> Result<KeyCode, String> {
         "end" => KeyCode::End,
         "pageup" | "pgup" => KeyCode::PageUp,
         "pagedown" | "pgdn" => KeyCode::PageDown,
-        other => {
-            let mut chars = other.chars();
+        _ => {
+            let mut chars = spec_key(spec).chars();
             match (chars.next(), chars.next()) {
                 (Some(c), None) => KeyCode::Char(c),
-                _ => return Err(format!("{other:?} is not a key (in {spec:?})")),
+                _ => return Err(format!("{name:?} is not a key (in {spec:?})")),
             }
         }
     })
+}
+
+/// The key part of `spec`, as written.
+fn spec_key(spec: &str) -> &str {
+    match spec.rsplit_once('-') {
+        Some((_, "")) => "-",
+        Some((_, key)) => key,
+        None => spec,
+    }
 }
 
 #[cfg(test)]
@@ -145,5 +166,14 @@ mod tests {
     fn a_function_key_out_of_range_is_not_silently_a_character() {
         assert!(parse("f99").is_err());
         assert_eq!(parse("f").unwrap().1, KeyCode::Char('f'));
+    }
+
+    #[test]
+    fn an_uppercase_letter_is_the_shifted_lowercase_one() {
+        // The terminal reports Shift+X as `X` with SHIFT.
+        let shifted = (KeyModifiers::SHIFT, KeyCode::Char('x'));
+        assert_eq!(parse("X").unwrap(), shifted);
+        assert_eq!(parse("shift-x").unwrap(), shifted);
+        assert_eq!(parse("Ctrl-X").unwrap(), parse("ctrl-x").unwrap());
     }
 }

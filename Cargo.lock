@@ -431,13 +431,11 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "flash",
- "libc",
  "nu-ansi-term",
  "reedline",
  "serde",
  "strum",
  "toml",
- "unicode-width",
 ]
 
 [[package]]

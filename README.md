@@ -13,7 +13,7 @@ you keep your existing bash prompt, completions and history.
 
 ## Installation
 
-requires bash 5.3 or newer
+Requires bash 5.3 or newer
 
 ```bash
 cargo build --release
@@ -35,10 +35,16 @@ echo "enable -f path/to/libreedline_bash.so reedline" >> ~/.bashrc
 
 You can configure reedline-bash by creating a `~/.config/reedline-bash/config.toml` file. 
 See `config.example.toml` for the defaults.
-
 An edit applies from the next prompt, so there is no need to restart the shell.
 Note that `~/.inputrc` is not read: it configures readline, which no longer
-sees your keys, so keybindings belong in `config.toml`.
+
+## Commands
+
+- `reedline` prints the loaded version.
+- `reedline --complete LINE` prints what the completer would offer at the end
+  of `LINE`, one candidate per line, with no terminal involved. Handy for
+  checking a compspec.
+- `enable -d reedline` unloads the plugin and hands the shell back to readline.
 
 ## How it works
 
@@ -65,7 +71,8 @@ through a function pointer, and that pointer can be replaced.
 1. We load reedline-bash into the bash process with: `enable -f reedline-bash.so reedline`
 2. Once loaded `bash_input.getter` points to our `get_char`. Bash will read
    through it instead of readline.
-3. Reedline draws the prompt and handles the editing, then returns the line.
+3. Bash decodes `PS1` before it asks for a line, as it would for readline.
+   reedline draws that prompt and handles the editing, then returns the line.
 4. We hand it back byte by byte, and bash runs normally.
 
 reedline-bash still uses your native bash completions and history, for inline suggestions and the completion menus provided by reedline.
@@ -82,6 +89,6 @@ reedline-bash still uses your native bash completions and history, for inline su
 
 ## License
 
-This project's code is licensed under [MIT](./LICENSE.md). 
+This project's code is licensed under [MIT](./LICENSE). 
 
 Compiled binaries are licensed under [GPLv3](./LICENSE-GPL).

@@ -1,4 +1,6 @@
-from harness import shell, test
+import os
+
+from harness import scratch, shell, test
 
 
 @test
@@ -79,3 +81,18 @@ def test_the_terminal_can_be_resized_under_the_editor():
         sh.resize(24, 40)
         sh.press(" ")
         assert sh.run("") == ["resized"]
+
+
+@test
+def test_ps1_is_evaluated_once_per_prompt():
+    """Bash decodes PS1 before asking for a line, so the editor uses that
+    decode rather than running the prompt's command substitutions again."""
+    log = os.path.join(scratch(), "evaluations")
+    with shell(rc=f"PS1='$(echo p1 >> {log})RL$ '") as sh:
+        with open(log) as fh:
+            before = fh.read().count("p1")
+        for _ in range(5):
+            sh.run("true")
+        with open(log) as fh:
+            after = fh.read().count("p1")
+    assert after - before == 5, f"PS1 ran {after - before} times for 5 prompts"

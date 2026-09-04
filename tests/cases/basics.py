@@ -98,3 +98,12 @@ def test_loading_the_builtin_twice_is_not_an_error():
     with shell() as sh:
         out = sh.run(f"enable -f {LIB} reedline; echo ok")
         assert out[-1] == "ok", out
+
+
+@test
+def test_ctrl_c_sets_the_exit_status_like_bash():
+    with shell() as sh:
+        sh.type("echo abandoned")
+        sh.send(ctrl("c"))
+        sh.wait_prompt()
+        assert sh.run("echo $?") == ["130"]

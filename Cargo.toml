@@ -16,8 +16,6 @@ crate-type = ["cdylib", "rlib"]
 reedline = "0.51.0"
 crossterm = "0.29"
 nu-ansi-term = "0.50"
-unicode-width = "0.2"
-libc = "0.2"
 toml = "0.8"
 strum = { version = "0.28.0", features = ["derive"] }
 # stolen from flyline

@@ -36,8 +36,11 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
 
     let (bare_word, quote_char) = dequote(word);
 
-    let (Ok(c_word), Ok(c_command)) = (CString::new(bare_word.as_str()), CString::new(command))
-    else {
+    let (Ok(c_word), Ok(c_command), Ok(c_line)) = (
+        CString::new(bare_word.as_str()),
+        CString::new(command),
+        CString::new(line),
+    ) else {
         // NUL cannot be typed and C strings dont contain it.
         return Candidates {
             matches: Vec::new(),
@@ -47,8 +50,9 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
     };
 
     unsafe {
-        publish_line(line, point);
+        publish_line(&c_line, point);
         publish_word_breaks(&breaks);
+        symbols::bashline_set_filename_hooks();
 
         // Readline resets these before every completion.
         symbols::rl_completion_quote_character = c_int::from(quote_char.unwrap_or(0));
@@ -66,7 +70,8 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
 
         let mut found: c_int = 0;
         let mut result = Vec::new();
-        if !cmdpos {
+        // `shopt -u progcomp` turns compspecs off.
+        if !cmdpos && symbols::prog_completion_enabled != 0 {
             let matches = symbols::programmable_completions(
                 c_command.as_ptr(),
                 c_word.as_ptr(),
@@ -136,6 +141,8 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
         // duplicates they make have to be removed after them, not before.
         strip_trailing_space(&mut result);
         if filenames {
+            let fignore = symbols::shell_variable("FIGNORE").unwrap_or_default();
+            ignore_suffixes(&mut result, &fignore, symbols::force_fignore != 0);
             mark_directories(&mut result);
         }
         dedupe(&mut result);
@@ -195,13 +202,34 @@ fn dedupe(candidates: &mut Vec<String>) {
 
 /// Whether the word starting at `word_start` is where a command name goes.
 ///
-/// That is the start of the line, or right after something that ends a command.
+/// That is the start of the line, or right after something that ends a
+/// command.
 fn in_command_position(line: &str, word_start: usize) -> bool {
     let before = line[..word_start].trim_end_matches([' ', '\t']);
-    match before.chars().last() {
-        None => true,
-        Some(c) => matches!(c, ';' | '|' | '&' | '(' | '{' | '!' | '\n'),
+    let mut tail = before.chars().rev();
+    let (Some(this), previous) = (tail.next(), tail.next()) else {
+        return true;
+    };
+    match (previous, this) {
+        (Some('<' | '>'), '&') | (Some('>'), '|') => false,
+        // `${ cmd; }` is a command substitution; `${var` is not.
+        (Some('$'), '{') => before.len() < word_start,
+        (_, ';' | '|' | '&' | '(' | '{' | '!' | '\n' | '`') => true,
+        _ => false,
     }
+}
+
+/// Drop the matches `FIGNORE` names.
+fn ignore_suffixes(candidates: &mut Vec<String>, fignore: &str, force: bool) {
+    let suffixes: Vec<&str> = fignore.split(':').filter(|s| !s.is_empty()).collect();
+    if suffixes.is_empty() {
+        return;
+    }
+    let acceptable = |name: &String| !suffixes.iter().any(|suffix| name.ends_with(suffix));
+    if !force && !candidates.iter().any(acceptable) {
+        return;
+    }
+    candidates.retain(acceptable);
 }
 
 /// Length of the `FOO=bar BAZ=qux ` prefix at the front of a command.
@@ -239,19 +267,12 @@ fn assignment_prefix(command: &str) -> usize {
 ///
 /// Bash builds `COMP_LINE` from `rl_line_buffer`. Readline is not running, so
 /// nothing else maintains it.
-///
 /// # Safety
-/// Calls bash's allocator. Must run on bash's thread.
-unsafe fn publish_line(line: &str, point: usize) {
+/// Calls into readline. Must run on bash's thread.
+unsafe fn publish_line(line: &CStr, point: usize) {
     unsafe {
-        // Readline reallocates this in place, so it has to be bash's to free.
-        let previous = symbols::rl_line_buffer;
-        symbols::rl_line_buffer = symbols::bash_strdup(line);
+        symbols::rl_replace_line(line.as_ptr(), 0);
         symbols::rl_point = point as c_int;
-        symbols::rl_end = line.len() as c_int;
-        if !previous.is_null() {
-            symbols::xfree(previous as *mut std::ffi::c_void);
-        }
     }
 }
 
@@ -377,7 +398,7 @@ fn mark_directories(candidates: &mut [String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{assignment_prefix, dequote, in_command_position};
+    use super::{assignment_prefix, dequote, ignore_suffixes, in_command_position};
 
     #[test]
     fn a_command_follows_anything_that_ends_one() {
@@ -396,6 +417,23 @@ mod tests {
         for line in ["ls ", "ls -", "cat file "] {
             assert!(!in_command_position(line, line.len()), "{line:?}");
         }
+    }
+
+    #[test]
+    fn a_backtick_opens_a_command_like_bash_says_it_does() {
+        // `COMMAND_SEPARATORS` in bashline.c is ";|&{(`".
+        assert!(in_command_position("echo `", 6));
+        assert!(in_command_position("echo `ec", 6));
+    }
+
+    #[test]
+    fn a_separator_that_is_really_a_redirection_does_not_open_a_command() {
+        // bashline.c's `check_redir`: `>&`, `<&` and `>|` are redirections,
+        // and `${` is an expansion
+        for line in ["cmd >&", "cmd <&", "cmd >|", "echo ${"] {
+            assert!(!in_command_position(line, line.len()), "{line:?}");
+        }
+        assert!(in_command_position("echo ${ ", 8));
     }
 
     #[test]
@@ -439,6 +477,26 @@ mod tests {
         super::strip_trailing_space(&mut candidates);
         super::dedupe(&mut candidates);
         assert_eq!(candidates, vec!["echo".to_string()]);
+    }
+
+    #[test]
+    fn fignore_drops_the_suffixes_it_names() {
+        let mut names = vec!["a.o".to_string(), "a.c".to_string(), "a.bak".to_string()];
+        ignore_suffixes(&mut names, ".o:.bak", true);
+        assert_eq!(names, vec!["a.c".to_string()]);
+
+        // Forced: nothing left is nothing offered. Unforced: the list stands.
+        let mut names = vec!["a.o".to_string()];
+        ignore_suffixes(&mut names, ".o", true);
+        assert!(names.is_empty());
+        let mut names = vec!["a.o".to_string()];
+        ignore_suffixes(&mut names, ".o", false);
+        assert_eq!(names, vec!["a.o".to_string()]);
+
+        let mut names = vec!["a.o".to_string()];
+        ignore_suffixes(&mut names, "", true);
+        ignore_suffixes(&mut names, ":", true);
+        assert_eq!(names, vec!["a.o".to_string()]);
     }
 
     #[test]

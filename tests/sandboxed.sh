@@ -14,6 +14,7 @@ fi
 
 
 if ! build_log=$(DOCKER_BUILDKIT=1 docker build \
+        --network host \
         --file "$CRATE/tests/Dockerfile" \
         --tag "$IMAGE" \
         "$CRATE" 2>&1); then

@@ -260,3 +260,43 @@ def test_partial_completion_can_be_turned_off():
         sh.press(TAB)
         # Without partial insertion the menu opens instead of extending the word.
         assert "prefix_one" in sh.screen
+
+
+@test
+def test_a_new_prompt_forgets_what_the_last_one_completed():
+    """The memo answers a repeated question within one prompt"""
+    workdir = scratch()
+    for name in ("one/alpha.txt", "two/apple.txt"):
+        os.makedirs(os.path.dirname(os.path.join(workdir, name)), exist_ok=True)
+        open(os.path.join(workdir, name), "w").close()
+    with shell(cwd=workdir) as sh:
+        sh.run("cd one")
+        sh.type("cat a")
+        sh.press(TAB)
+        assert sh.line == "cat alpha.txt", sh.line
+        sh.press(ctrl("c"))
+        sh.wait_prompt()
+        sh.run("cd ../two")
+        sh.type("cat a")
+        sh.press(TAB)
+        assert sh.line == "cat apple.txt", sh.line
+
+
+@test
+def test_fignore_hides_the_suffixes_it_names():
+    rc = 'cd "$HOME"; touch a.o a.c; FIGNORE=.o'
+    assert complete("cat a", rc=rc) == ["a.c"]
+
+
+@test
+def test_a_variable_in_the_directory_part_is_expanded_to_look_inside():
+    """Readline asks bash to expand `$D` before reading the directory; the
+    match keeps the variable as typed."""
+    rc = 'mkdir -p "$HOME/sub"; touch "$HOME/sub/file.txt"; export D="$HOME/sub"'
+    assert complete("cat $D/f", rc=rc) == ["$D/file.txt"]
+
+
+@test
+def test_turning_progcomp_off_turns_compspecs_off():
+    rc = 'cd "$HOME"; complete -W alpha widget; shopt -u progcomp'
+    assert complete("widget a", rc=rc) == []
