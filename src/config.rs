@@ -33,6 +33,25 @@ pub fn path() -> Option<PathBuf> {
     Some(Path::new(&home).join(".config/reedline-bash/config.toml"))
 }
 
+/// `$XDG_CACHE_HOME/reedline-bash`, or its default under `$HOME`.
+pub fn cache_dir() -> Option<PathBuf> {
+    let xdg = std::env::var_os("XDG_CACHE_HOME").filter(|dir| !dir.is_empty());
+    let base = match xdg {
+        Some(dir) => PathBuf::from(dir),
+        None => PathBuf::from(std::env::var_os("HOME")?).join(".cache"),
+    };
+    Some(base.join("reedline-bash"))
+}
+
+/// `$XDG_DATA_HOME`, or its default under `$HOME`.
+pub fn data_dir() -> Option<PathBuf> {
+    let xdg = std::env::var_os("XDG_DATA_HOME").filter(|dir| !dir.is_empty());
+    Some(match xdg {
+        Some(dir) => PathBuf::from(dir),
+        None => PathBuf::from(std::env::var_os("HOME")?).join(".local/share"),
+    })
+}
+
 /// a warning about a invalid config setting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Warning(pub String);
@@ -393,6 +412,10 @@ pub struct Config {
 
     // completion
     pub partial_completions: bool,
+    /// Describe commands and options from the manpages.
+    pub descriptions: bool,
+    /// If parsed manpages should be cached.
+    pub description_cache: bool,
 
     // history
     pub history_size: usize,
@@ -421,6 +444,8 @@ impl Default for Config {
             selection_style: Style::new().reverse(),
             selection_cursor_style: None,
             partial_completions: true,
+            descriptions: true,
+            description_cache: true,
             history_size: 5000,
             abbreviations: HashMap::new(),
             keybindings: Vec::new(),
@@ -474,6 +499,11 @@ impl Config {
         if let Some(partial) = raw.completion.partial {
             config.partial_completions = partial;
         }
+        assign(&mut config.descriptions, raw.completion.descriptions);
+        assign(
+            &mut config.description_cache,
+            raw.completion.description_cache,
+        );
         if raw.completion.quick.is_some() {
             notes.push("completion.quick is not configurable: Tab stepping depends on it".into());
         }
@@ -962,6 +992,8 @@ struct RawColors {
 struct RawCompletion {
     partial: Option<bool>,
     quick: Option<bool>,
+    descriptions: Option<bool>,
+    description_cache: Option<bool>,
     #[serde(flatten)]
     unknown: HashMap<String, toml::Value>,
 }
@@ -1435,6 +1467,8 @@ mod tests {
 
             [completion]
             partial = false
+            descriptions = false
+            description_cache = false
 
             [history]
             size = 42
@@ -1519,6 +1553,8 @@ mod tests {
         assert_eq!(config.selection_cursor_style, Some(Style::new().italic()));
 
         assert!(!config.partial_completions);
+        assert!(!config.descriptions);
+        assert!(!config.description_cache);
         assert_eq!(config.history_size, 42);
 
         assert_eq!(

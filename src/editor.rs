@@ -15,7 +15,9 @@ use std::sync::atomic::Ordering;
 use crate::bash::symbols;
 use crate::{
     completer::{BashCompleter, BashSource, PromptCount},
-    config, highlighter, history,
+    config,
+    describe::{self, Describer, ManDescriber, NoDescriptions},
+    highlighter, history,
     prompt::BashPrompt,
     validator::BashValidator,
 };
@@ -137,6 +139,14 @@ fn expand(name: &str) -> String {
 
 const SIGINT: std::os::raw::c_int = 2;
 
+fn describer(config: &config::Config) -> Box<dyn Describer> {
+    if !config.descriptions {
+        return Box::new(NoDescriptions);
+    }
+    let cache = config.description_cache.then(describe::cache_dir).flatten();
+    Box::new(ManDescriber::new(cache))
+}
+
 /// Where Ctrl-O writes the line for the editor to open.
 fn buffer_file(runtime_dir: Option<&Path>, pid: u32) -> PathBuf {
     runtime_dir
@@ -158,6 +168,7 @@ fn build(config: &config::Config, prompt_count: &PromptCount) -> Reedline {
         .with_highlighter(highlighter::for_config(config.highlight, &config.palette))
         .with_completer(Box::new(BashCompleter::new(
             BashSource,
+            describer(config),
             Arc::clone(prompt_count),
         )))
         .with_validator(Box::new(BashValidator))

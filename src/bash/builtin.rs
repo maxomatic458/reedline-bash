@@ -1,7 +1,7 @@
 use std::os::raw::c_char;
 
 /// A null-terminated array of strings, as required by `struct builtin.long_doc`.
-pub struct DocLines(pub [*const c_char; 3]);
+pub struct DocLines(pub [*const c_char; 4]);
 
 // SAFETY: every pointer is to a `'static` C string literal and is only read.
 unsafe impl Sync for DocLines {}

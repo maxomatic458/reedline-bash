@@ -300,3 +300,17 @@ def test_a_variable_in_the_directory_part_is_expanded_to_look_inside():
 def test_turning_progcomp_off_turns_compspecs_off():
     rc = 'cd "$HOME"; complete -W alpha widget; shopt -u progcomp'
     assert complete("widget a", rc=rc) == []
+
+
+@test
+def test_a_word_a_compspec_finished_with_a_space_ends_the_word():
+    """bash-completion's git answers `add ` under `-o nospace`: the space is
+    in the word, and readline inserts it. Picking it from the menu must leave
+    the cursor past a space too, not glued to the next thing typed."""
+    rc = '_w() { COMPREPLY=("add " "am "); compopt -o nospace; }; complete -F _w widget'
+    with shell(rc=rc) as sh:
+        sh.type("widget a")
+        sh.press(TAB)
+        sh.press("\r")
+        sh.type("--x")
+        assert sh.line == "widget add --x", sh.line
