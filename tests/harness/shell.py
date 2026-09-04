@@ -361,7 +361,7 @@ def complete(line, rc="", bash_completion=False):
             raise Skipped("bash-completion is not installed")
         setup = f"source {BASH_COMPLETION}\n"
 
-    script = f"enable -f {LIB} reedline\n{setup}{rc}\nreedline --complete {shlex.quote(line)}\n"
+    script = f"enable -f {LIB} reedline\n{setup}{rc}\nreedline complete {shlex.quote(line)}\n"
     done = subprocess.run(
         ["bash", "--noprofile", "--norc"],
         input=script,

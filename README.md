@@ -40,10 +40,11 @@ Note that `~/.inputrc` is not read: it configures readline, which no longer
 
 ## Commands
 
-- `reedline` prints the loaded version.
-- `reedline --complete LINE` prints what the completer would offer at the end
-  of `LINE`, one candidate per line, with no terminal involved. Handy for
-  checking a compspec.
+- `reedline` prints the loaded version. `reedline --help` lists the rest.
+- `reedline complete LINE` prints what the completer would offer at the end
+  of `LINE`, one suggestion per line.
+- `reedline clear-cache` deletes the parsed manpage cache.
+- `reedline install-man` installs the `reedline` manpage.
 - `enable -d reedline` unloads the plugin and hands the shell back to readline.
 
 ## How it works

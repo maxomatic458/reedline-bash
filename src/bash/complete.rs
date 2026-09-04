@@ -12,6 +12,11 @@ pub struct Candidates {
     pub quote: bool,
     /// appended to a lone match.
     pub append: Option<char>,
+    /// The matches are command names.
+    pub command_names: bool,
+    /// The words of the command the word belongs to: e.g
+    /// `git add --v` -> `git` and `add`.
+    pub command_words: Vec<String>,
 }
 
 /// Candidates for the word between `word_start` and `point`.
@@ -46,6 +51,8 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
             matches: Vec::new(),
             quote: false,
             append: None,
+            command_names: false,
+            command_words: Vec::new(),
         };
     };
 
@@ -150,6 +157,11 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
             matches: result,
             quote,
             append,
+            command_names: cmdpos,
+            command_words: line[command_start.min(word_start)..word_start]
+                .split_whitespace()
+                .map(str::to_string)
+                .collect(),
         }
     }
 }

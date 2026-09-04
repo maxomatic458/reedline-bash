@@ -165,7 +165,15 @@ selection_cursor = ""
 # completions.partial: set this to false to prevent partial filling of the
 # prompt
 partial = true
+# Enable descriptions in the completion menu. These are fetched from whatis/man
+# for programs and their subcommands, options
+descriptions = true
 
+# Descriptions are generated/parsed from the manpage, if this is set to true, those
+# results will be cached on disk (which is recommended, otherwise each completion
+# may take > 100ms). The cache will be stored in $XDG_CACHE_HOME/reedline-bash/man
+# / ~/.cache/reedline-bash/man.
+description_cache = true
 
 [history]
 # history.size: how many entries to read back from the shell's history.

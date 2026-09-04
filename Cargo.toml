@@ -16,11 +16,18 @@ crate-type = ["cdylib", "rlib"]
 reedline = "0.51.0"
 crossterm = "0.29"
 nu-ansi-term = "0.50"
+libc = "0.2"
+flate2 = "1"
+clap = { version = "4.5", default-features = false, features = ["std", "help", "usage", "error-context"] }
 toml = "0.8"
 strum = { version = "0.28.0", features = ["derive"] }
 # stolen from flyline
 flash = { git = "https://github.com/maxomatic458/flash.git", rev = "4a9145d17bd8b62fe8e872de10f837ef1dd5b72a" }
 serde = { version = "1.0.229", features = ["derive"] }
+
+[build-dependencies]
+clap = { version = "4.5", default-features = false, features = ["std", "help", "usage", "error-context"] }
+clap_mangen = "0.2"
 
 # crossterm 0.29 has a bug where it loops forever on a closed terminal. 
 # This happens with reedline-bash, the fix is not in upstream yet, therefore
