@@ -12,6 +12,9 @@ pub struct Candidates {
     pub quote: bool,
     /// appended to a lone match.
     pub append: Option<char>,
+    /// The matches that bash-completion marked as finished words, by giving
+    /// them a trailing space under `-o nospace`. readline inserts that space.
+    pub finished: std::collections::HashSet<String>,
     /// The matches are command names.
     pub command_names: bool,
     /// The words of the command the word belongs to: e.g
@@ -51,6 +54,7 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
             matches: Vec::new(),
             quote: false,
             append: None,
+            finished: std::collections::HashSet::new(),
             command_names: false,
             command_words: Vec::new(),
         };
@@ -146,7 +150,7 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
 
         // Both of these can turn two different strings into one, so the
         // duplicates they make have to be removed after them, not before.
-        strip_trailing_space(&mut result);
+        let finished = take_trailing_space(&mut result);
         if filenames {
             let fignore = symbols::shell_variable("FIGNORE").unwrap_or_default();
             ignore_suffixes(&mut result, &fignore, symbols::force_fignore != 0);
@@ -157,6 +161,7 @@ pub unsafe fn candidates(line: &str, word_start: usize, point: usize) -> Candida
             matches: result,
             quote,
             append,
+            finished,
             command_names: cmdpos,
             command_words: line[command_start.min(word_start)..word_start]
                 .split_whitespace()
@@ -375,13 +380,17 @@ unsafe fn take_matches(matches: *mut *mut c_char, convention: Convention) -> Vec
     }
 }
 
-/// Drop the trailing space bash-completion puts on a finished word.
-fn strip_trailing_space(candidates: &mut [String]) {
+/// Drop the trailing space bash-completion puts on a finished word, and say
+/// which words had one: the space is what readline would have inserted.
+fn take_trailing_space(candidates: &mut [String]) -> std::collections::HashSet<String> {
+    let mut finished = std::collections::HashSet::new();
     for candidate in candidates {
         if candidate.ends_with(' ') && !candidate.trim_end().is_empty() {
             candidate.pop();
+            finished.insert(candidate.clone());
         }
     }
+    finished
 }
 
 /// Append `/` to candidates that name a directory.
@@ -486,9 +495,13 @@ mod tests {
     fn a_candidate_is_deduped_after_it_is_rewritten() {
         // `echo` and `echo ` are two strings until the space is stripped.
         let mut candidates = vec!["echo ".to_string(), "echo".to_string()];
-        super::strip_trailing_space(&mut candidates);
+        let finished = super::take_trailing_space(&mut candidates);
         super::dedupe(&mut candidates);
         assert_eq!(candidates, vec!["echo".to_string()]);
+        assert!(
+            finished.contains("echo"),
+            "the space meant the word was done"
+        );
     }
 
     #[test]

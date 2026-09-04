@@ -93,6 +93,7 @@ fn to_suggestions(
         matches,
         quote,
         append,
+        finished,
         command_names,
         command_words,
     } = candidates;
@@ -115,9 +116,10 @@ fn to_suggestions(
             };
             // reedline can only add a space, any other character
             // bash needs goes into the word itself.
-            let mut whitespace = false;
+            // A word bash-completion finished with a space gets it back.
+            let mut whitespace = finished.contains(&candidate);
             match append {
-                Some(' ') => whitespace = !candidate.ends_with('/'),
+                Some(' ') => whitespace |= !candidate.ends_with('/'),
                 Some(character) if !value.ends_with(character) => value.push(character),
                 _ => {}
             }
@@ -200,6 +202,7 @@ mod tests {
         /// What bash would have reported alongside the matches.
         quote: bool,
         append: Option<char>,
+        finished: Vec<&'static str>,
         command_names: bool,
     }
 
@@ -211,6 +214,7 @@ mod tests {
                 fail: false,
                 quote: true,
                 append: Some(' '),
+                finished: Vec::new(),
                 command_names: false,
             }
         }
@@ -231,6 +235,7 @@ mod tests {
                 matches: self.answers.clone(),
                 quote: self.quote,
                 append: self.append,
+                finished: self.finished.iter().map(|s| s.to_string()).collect(),
                 command_names: self.command_names,
                 command_words: line[..pos.min(line.len())]
                     .split_whitespace()
@@ -390,6 +395,23 @@ mod tests {
         let suggestion = &result.suggestions()[0];
         assert_eq!(suggestion.value, "$HOME/");
         assert!(!suggestion.append_whitespace, "the slash already ended it");
+    }
+
+    #[test]
+    fn a_word_bash_completion_finished_gets_its_space_back() {
+        // git's completion answers `add ` under `-o nospace`: no append
+        // character, but the word itself carries the space readline inserts.
+        let mut source = FakeSource::new(&["add", "am"]);
+        source.append = None;
+        source.finished = vec!["add"];
+        let mut completer =
+            BashCompleter::new(source, Box::new(NoDescriptions), PromptCount::default());
+        let result = completer.complete("git a", 5);
+        assert!(
+            result.suggestions()[0].append_whitespace,
+            "add was finished"
+        );
+        assert!(!result.suggestions()[1].append_whitespace, "am was not");
     }
 
     #[test]

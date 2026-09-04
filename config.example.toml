@@ -87,7 +87,7 @@ col_padding = 2
 # horizontal | vertical
 traversal = "horizontal"
 
-# IDE-style dropdown below the cursor, with a description box to the side (currently not implemented).
+# IDE-style dropdown below the cursor, with a description box to the side.
 [menu.ide]
 min_width = 0
 max_width = 50
