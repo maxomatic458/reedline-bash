@@ -1,7 +1,7 @@
 use reedline::{
-    ColumnarMenu, CursorConfig, DefaultHinter, DescriptionMode, DescriptionPosition, EditMode,
-    Emacs, Helix, IdeMenu, KeyCode, KeyModifiers, Keybindings, ListMenu, Menu, MenuBuilder,
-    MouseClickMode, Osc133ClickEventsMarkers, Osc133Markers, Osc633Markers, Reedline,
+    ColumnarMenu, CursorConfig, DefaultHinter, DescriptionMode, DescriptionPosition, EditCommand,
+    EditMode, Emacs, Helix, IdeMenu, KeyCode, KeyModifiers, Keybindings, ListMenu, Menu,
+    MenuBuilder, MouseClickMode, Osc133ClickEventsMarkers, Osc133Markers, Osc633Markers, Reedline,
     ReedlineEvent, ReedlineMenu, SemanticPromptMarkers, Signal, TraversalDirection, Vi,
     default_emacs_keybindings, default_helix_insert_keybindings, default_helix_normal_keybindings,
     default_helix_select_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
@@ -75,7 +75,7 @@ impl Editor {
                     // reedline resumes on the prompt it suspended,
                     // print a newline so the command output doesn't overwrite it.
                     println!();
-                    unsafe { symbols::run_host_command(&command) };
+                    self.run_host_command(&command);
                     continue;
                 }
                 // Abandoned, not submitted: an empty command gets a fresh
@@ -92,6 +92,39 @@ impl Editor {
                 }
             };
         }
+    }
+
+    /// Run a host command the way bash runs `bind -x`: it reads and edits
+    /// the line through `READLINE_LINE`, with `READLINE_POINT` in characters.
+    fn run_host_command(&mut self, command: &str) {
+        let line = self.line_editor.current_buffer_contents().to_string();
+        let point = char_offset(&line, self.line_editor.current_insertion_point());
+        unsafe {
+            symbols::set_shell_variable("READLINE_LINE", &line);
+            symbols::set_shell_variable("READLINE_POINT", &point.to_string());
+            symbols::run_host_command(command);
+        }
+        let new_line = unsafe { symbols::shell_variable("READLINE_LINE") }.unwrap_or_default();
+        let new_point = unsafe { symbols::shell_variable("READLINE_POINT") }
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(point);
+        // bash-preexec skips commands while these are set, as inside a `bind -x`.
+        unsafe {
+            symbols::unset_shell_variable("READLINE_LINE");
+            symbols::unset_shell_variable("READLINE_POINT");
+        }
+        if new_line == line && new_point == point {
+            return;
+        }
+        let position = byte_offset(&new_line, new_point);
+        self.line_editor.run_edit_commands(&[
+            EditCommand::Clear,
+            EditCommand::InsertString(new_line),
+            EditCommand::MoveToPosition {
+                position,
+                select: false,
+            },
+        ]);
     }
 
     fn reload_if_config_changed(&mut self) {
@@ -138,6 +171,18 @@ fn expand(name: &str) -> String {
 }
 
 const SIGINT: std::os::raw::c_int = 2;
+
+fn char_offset(line: &str, byte: usize) -> usize {
+    line.get(..byte)
+        .map_or(line.chars().count(), |head| head.chars().count())
+}
+
+/// The byte where character `chars` of `line` starts, or its end past the last one.
+fn byte_offset(line: &str, chars: usize) -> usize {
+    line.char_indices()
+        .nth(chars)
+        .map_or(line.len(), |(byte, _)| byte)
+}
 
 fn describer(config: &config::Config) -> Box<dyn Describer> {
     if !config.descriptions {
@@ -417,5 +462,19 @@ mod tests {
         let path = buffer_file(None, 77);
         assert!(path.starts_with(std::env::temp_dir()), "{path:?}");
         assert!(path.to_string_lossy().contains("77"), "{path:?}");
+    }
+
+    #[test]
+    fn readline_point_counts_characters_not_bytes() {
+        let line = "héllo wörld";
+        assert_eq!(char_offset(line, "héllo w".len()), 7);
+        assert_eq!(byte_offset(line, 7), "héllo w".len());
+    }
+
+    #[test]
+    fn a_readline_point_past_the_end_lands_on_the_end() {
+        let line = "héllo";
+        assert_eq!(byte_offset(line, 99), line.len());
+        assert_eq!(char_offset(line, 99), 5);
     }
 }
