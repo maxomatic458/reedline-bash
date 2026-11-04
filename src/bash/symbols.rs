@@ -299,6 +299,22 @@ unsafe extern "C" {
     pub fn get_variable_value(var: *mut c_void) -> *mut c_char;
 
     /// ```c
+    /// extern SHELL_VAR *bind_variable (const char *, const char *, int);
+    /// ```
+    /// [`variables.h:305`] — bash copies `value`, the caller keeps ownership.
+    ///
+    /// [`variables.h:305`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/variables.h?h=bash-5.3#n305
+    pub fn bind_variable(name: *const c_char, value: *const c_char, flags: c_int) -> *mut c_void;
+
+    /// ```c
+    /// extern int unbind_variable (const char *);
+    /// ```
+    /// [`variables.h:341`]
+    ///
+    /// [`variables.h:341`]: https://cgit.git.savannah.gnu.org/cgit/bash.git/tree/variables.h?h=bash-5.3#n341
+    pub fn unbind_variable(name: *const c_char) -> c_int;
+
+    /// ```c
     /// extern PTR_T xmalloc (size_t);
     /// ```
     /// [`xmalloc.h:33`] — bash frees what it is given with its own allocator,
@@ -636,6 +652,29 @@ pub unsafe fn shell_variable(name: &str) -> Option<String> {
             .to_string_lossy()
             .into_owned(),
     )
+}
+
+/// Set a shell variable, as `name=value` would.
+///
+/// # Safety
+/// Calls into bash. must run on the thread bash called into us on.
+pub unsafe fn set_shell_variable(name: &str, value: &str) {
+    let (Ok(c_name), Ok(c_value)) = (std::ffi::CString::new(name), std::ffi::CString::new(value))
+    else {
+        return;
+    };
+    unsafe { bind_variable(c_name.as_ptr(), c_value.as_ptr(), 0) };
+}
+
+/// Unset a shell variable.
+///
+/// # Safety
+/// Calls into bash. must run on the thread bash called into us on.
+pub unsafe fn unset_shell_variable(name: &str) {
+    let Ok(c_name) = std::ffi::CString::new(name) else {
+        return;
+    };
+    unsafe { unbind_variable(c_name.as_ptr()) };
 }
 
 /// How many commands the shell is holding.
